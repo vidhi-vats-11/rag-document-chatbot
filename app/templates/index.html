@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%232f5bea'/></svg>">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <h1>{{ app_name }}</h1>
+    <div class="topbar-right">
+      <span id="health" class="pill">Checking…</span>
+      <a href="/docs" target="_blank" rel="noopener">API docs</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Documents column -->
+    <section class="panel" aria-labelledby="docs-title">
+      <h2 id="docs-title">Documents</h2>
+
+      <form id="upload-form" class="upload">
+        <label for="file-input" class="dropzone" id="dropzone">
+          <strong>Choose a file</strong> or drag it here
+          <span class="muted">PDF (incl. scanned), PNG, JPG, DOCX · max {{ max_upload_mb | int }} MB</span>
+        </label>
+        <input id="file-input" type="file" name="file"
+               accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+        <label for="ocr-language" class="field-label">Language of scanned pages and images</label>
+        <select id="ocr-language">
+          <option value="">English</option>
+        </select>
+        <button type="submit" id="upload-btn" disabled>Upload &amp; index</button>
+      </form>
+      <div id="upload-status" class="status" role="status" aria-live="polite"></div>
+
+      <ul id="doc-list" class="doc-list" aria-label="Uploaded documents"></ul>
+      <p id="doc-empty" class="muted">No documents yet.</p>
+    </section>
+
+    <!-- Chat column -->
+    <section class="panel chat" aria-labelledby="chat-title">
+      <div class="panel-head">
+        <h2 id="chat-title">Ask a question</h2>
+        <button type="button" id="new-chat-btn" class="secondary" title="Forget this conversation and start again">New chat</button>
+      </div>
+
+      <div id="conversation" class="conversation" aria-live="polite"></div>
+
+      <form id="ask-form" class="ask">
+        <label for="scope" class="sr-only">Search scope</label>
+        <select id="scope">
+          <option value="">All indexed documents</option>
+        </select>
+        <div class="ask-row">
+          <label for="question" class="sr-only">Question</label>
+          <textarea id="question" rows="2" maxlength="2000" placeholder="e.g. What are the payment terms?" required></textarea>
+          <button type="submit" id="ask-btn">Ask</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', path='js/app.js') }}"></script>
+</body>
+</html>

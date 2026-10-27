@@ -1,0 +1,15 @@
+[project]
+name = "rag-document-chatbot"
+version = "1.0.0"
+description = "RAG chatbot over uploaded PDFs, scanned PDFs, images and DOCX files"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: loads the real embedding model (downloads it on first run)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
