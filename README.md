@@ -7,18 +7,36 @@ come with the source filename and page number.
 Built with FastAPI, PyMuPDF, Tesseract OCR, python-docx, Sentence Transformers,
 ChromaDB and a configurable LLM (Claude by default, or any OpenAI-compatible API).
 
+## Highlights
+
+- **Reads almost any document:** normal PDFs, scanned PDFs and images (OCR with Tesseract,
+  in many languages), and Word files, including tables.
+- **Answers you can check:** every answer cites the file and page it came from. If the documents
+  don't cover a question, it says so instead of making something up.
+- **Two-stage search:** fast vector search (Sentence Transformers + ChromaDB) finds candidates,
+  then a cross-encoder re-ranks them for accuracy.
+- **Choose your models:** pick the embedding model per upload and the LLM per question.
+- **Follow-up questions:** the chat remembers recent turns.
+- **Runs for free:** embeddings, re-ranking and OCR run locally; the LLM can be Google Gemini's
+  free tier, a local Ollama model, Claude or OpenAI.
+- **Built carefully:** layered design (routes → services → repositories), file-content validation,
+  prompt-injection defences, background indexing, and 125 automated tests.
+
+<!-- Demo video: drag your .mp4 into a GitHub README edit box to upload it, and it will appear here. -->
+
 ---
 
 ## 1. Quick start (macOS)
 
 ```bash
 # 1. System dependency: Tesseract OCR (for scanned PDFs and images)
-brew install tesseract          # already installed on this machine (5.5.1)
-brew install tesseract-lang     # optional: ~160 extra OCR languages (installed on this machine)
+brew install tesseract
+brew install tesseract-lang     # optional: ~160 extra OCR languages
 
-# 2. Python environment (Python 3.11–3.13; 3.13 recommended)
-cd "/Users/vidhi/Desktop/Rag architecture based chatbot"
-/opt/homebrew/bin/python3.13 -m venv .venv
+# 2. Get the code and a Python environment (Python 3.11–3.13; 3.13 recommended)
+git clone https://github.com/vidhi-vats-11/rag-document-chatbot.git
+cd rag-document-chatbot
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 
@@ -35,6 +53,13 @@ Open:
 - **Swagger (interactive API docs):** http://127.0.0.1:8000/docs
 
 The first start downloads the embedding model (~90 MB) into `~/.cache/huggingface`.
+
+**With Docker instead** (Tesseract and the models are included):
+
+```bash
+docker build -t rag-chatbot .
+docker run -p 7860:7860 --env-file .env rag-chatbot    # then open http://localhost:7860
+```
 
 > Windows/Linux: install Tesseract (`sudo apt install tesseract-ocr`, or the
 > [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) on Windows and
