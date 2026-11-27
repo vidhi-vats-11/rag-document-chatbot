@@ -25,3 +25,7 @@ samples/
 .DS_Store
 .idea/
 .vscode/
+
+# Personal notes (kept locally, not published)
+CLAUDE.md
+PROJECT_TRACKER.md
