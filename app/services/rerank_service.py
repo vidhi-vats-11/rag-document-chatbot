@@ -14,7 +14,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import threading
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from app.domain import RetrievedChunk
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class PairScorer(Protocol):
-    """The subset of CrossEncoder we use; lets tests inject a fake model."""
+    """What we need from a model: `predict(pairs)` -> 0..1 scores. Lets tests inject a fake model."""
 
     def predict(self, inputs: Any, **kwargs: Any) -> Any: ...
 
@@ -32,20 +32,16 @@ class RerankService:
         self.model_name = model_name
         self.batch_size = batch_size
         self._model = model
-        self._activation: Callable | None = None
         self._lock = threading.Lock()
 
     def _get_model(self) -> PairScorer:
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    import torch
-                    from sentence_transformers import CrossEncoder  # heavy import
+                    from app.services.onnx_models import OnnxCrossEncoder  # heavy import
 
                     logger.info("Loading re-ranking model '%s'...", self.model_name)
-                    # Sigmoid turns the raw score into 0..1, which is easier to read.
-                    self._activation = torch.sigmoid
-                    self._model = CrossEncoder(self.model_name)
+                    self._model = OnnxCrossEncoder(self.model_name)
         return self._model
 
     def rerank(self, query: str, chunks: list[RetrievedChunk], top_k: int) -> list[RetrievedChunk]:
@@ -53,12 +49,7 @@ class RerankService:
         if not chunks:
             return []
         model = self._get_model()
-        scores = model.predict(
-            [(query, c.text) for c in chunks],
-            batch_size=self.batch_size,
-            activation_fn=self._activation,
-            show_progress_bar=False,
-        )
+        scores = model.predict([(query, c.text) for c in chunks], batch_size=self.batch_size)
         scored = [dataclasses.replace(c, rerank_score=float(s)) for c, s in zip(chunks, scores)]
         scored.sort(key=lambda c: c.rerank_score, reverse=True)
         logger.info(

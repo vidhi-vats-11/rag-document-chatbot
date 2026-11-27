@@ -15,5 +15,5 @@ def configure_logging(level: str = "INFO") -> None:
     root.handlers = [handler]
     root.setLevel(level.upper())
     # Third-party libraries are noisy at INFO level.
-    for noisy in ("httpx", "httpx2", "chromadb", "sentence_transformers", "urllib3"):
+    for noisy in ("httpx", "httpx2", "chromadb", "fastembed", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

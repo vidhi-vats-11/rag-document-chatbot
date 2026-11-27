@@ -50,6 +50,31 @@ def test_real_model_semantic_similarity():
     assert dot(q, related) > dot(q, unrelated)
 
 
+@pytest.mark.slow
+def test_real_models_not_built_into_fastembed():
+    """A model fastembed doesn't list (registered from its onnx/ file) and the real re-ranker."""
+    from app.domain import RetrievedChunk
+    from app.services.rerank_service import RerankService
+
+    question = "How many days a week can I work from home?"
+    texts = ["Employees may work remotely up to three days per week.", "The cafeteria opens at 9am."]
+    try:
+        q, related, unrelated = EmbeddingService("sentence-transformers/multi-qa-MiniLM-L6-cos-v1").embed_documents(
+            [question, *texts]
+        )
+        chunks = [
+            RetrievedChunk(chunk_id=str(i), document_id="d", filename="f", page_number=1, text=t, score=0.0)
+            for i, t in enumerate(texts)
+        ]
+        ranked = RerankService("cross-encoder/ms-marco-MiniLM-L6-v2").rerank(question, chunks, top_k=2)
+    except OSError as exc:  # offline and not cached
+        pytest.skip(f"model unavailable: {exc}")
+    dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+    assert dot(q, related) > dot(q, unrelated)
+    assert [c.chunk_id for c in ranked] == ["0", "1"]
+    assert 0.9 < ranked[0].rerank_score <= 1.0 and ranked[1].rerank_score < 0.1
+
+
 # ------------------------------------------------------------------ vector store
 
 

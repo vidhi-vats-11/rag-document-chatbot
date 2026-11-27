@@ -17,7 +17,7 @@ ChromaDB and a configurable LLM (Claude by default, or any OpenAI-compatible API
   then a cross-encoder re-ranks them for accuracy.
 - **Choose your models:** pick the embedding model per upload and the LLM per question.
 - **Follow-up questions:** the chat remembers recent turns.
-- **Runs for free:** embeddings, re-ranking and OCR run locally; the LLM can be Google Gemini's
+- **Runs for free:** embeddings, re-ranking (ONNX Runtime, no PyTorch needed) and OCR run locally; the LLM can be Google Gemini's
   free tier, a local Ollama model, Claude or OpenAI.
 - **Built carefully:** layered design (routes → services → repositories), file-content validation,
   prompt-injection defences, background indexing, and 125 automated tests.
@@ -52,7 +52,7 @@ Open:
 - **Web UI:** http://127.0.0.1:8000
 - **Swagger (interactive API docs):** http://127.0.0.1:8000/docs
 
-The first start downloads the embedding model (~90 MB) into `~/.cache/huggingface`.
+The first start downloads the embedding and re-ranking models (~90 MB each) into `~/.cache/fastembed`.
 
 **With Docker instead** (Tesseract and the models are included):
 
@@ -254,6 +254,7 @@ Browser (templates + static JS)        Swagger UI (/docs)
 | `app/services/extraction_service.py` | PDF, OCR and DOCX text extraction |
 | `app/services/chunking_service.py` | Normalisation, overlap chunking, deterministic chunk IDs |
 | `app/services/embedding_service.py` | Lazy-loaded Sentence Transformers encoder |
+| `app/services/onnx_models.py` | Runs the models with ONNX Runtime (fastembed) instead of PyTorch: same results, ~10× smaller install |
 | `app/services/retrieval_service.py` | Query embedding, search, relevance filtering |
 | `app/services/generation_service.py` | Prompt construction, citation parsing |
 | `app/services/llm_providers.py` | Anthropic / OpenAI-compatible adapters; maps SDK errors to ours |

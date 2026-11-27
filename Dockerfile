@@ -15,20 +15,19 @@ USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
     HF_HOME=/home/user/.cache/huggingface \
+    FASTEMBED_CACHE_PATH=/home/user/.cache/fastembed \
     PYTHONUNBUFFERED=1
 WORKDIR /home/user/app
 
-# CPU-only PyTorch first: the default download includes GPU code and is several GB bigger.
 COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir --user torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir --user -r requirements.txt
-
-# Download the default embedding and re-ranking models now, so the app starts fast.
-RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
-SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); \
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 COPY --chown=user . .
+
+# Download the default embedding and re-ranking models now, so the app starts fast.
+RUN python -c "from app.services.onnx_models import OnnxSentenceEncoder, OnnxCrossEncoder; \
+OnnxSentenceEncoder('sentence-transformers/all-MiniLM-L6-v2'); \
+OnnxCrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
 
 EXPOSE 7860
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
