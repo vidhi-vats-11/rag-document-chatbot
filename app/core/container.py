@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.core.config import Settings
+from app.repositories.answer_cache_repository import AnswerCacheRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.vector_store import VectorStore
+from app.services.answer_cache_service import AnswerCacheService
 from app.services.chat_service import ChatService
 from app.services.chunking_service import ChunkingService
 from app.services.document_service import DocumentService
@@ -92,6 +94,13 @@ def build_container(
         generation=GenerationService(llm),
         history_turns=settings.chat_history_turns,
         llm_models=settings.llm_models,
+        cache=AnswerCacheService(
+            AnswerCacheRepository(settings.metadata_db_path),
+            embedder,
+            enabled=settings.answer_cache_enabled,
+            min_similarity=settings.answer_cache_min_similarity,
+            max_entries=settings.answer_cache_max_entries,
+        ),
     )
     return Container(
         settings, extractor, embedder, vector_store, spaces, reranker, document_service, chat_service

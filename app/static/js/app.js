@@ -317,7 +317,11 @@ function showBotAnswer(node, answer, sources, meta) {
   node.textContent = answer;
   const box = renderSources(sources || []);
   if (box) node.append(box);
-  if (meta?.llm_model) {
+  if (meta?.cached) {
+    // Reused an earlier answer to the same question: instant, and no AI request was used.
+    const by = meta.llm_model ? ` · originally by ${meta.llm_model}` : "";
+    node.append(el("div", { class: "answer-meta cached" }, `⚡ From cache: no AI request used${by}`));
+  } else if (meta?.llm_model) {
     node.append(el("div", { class: "answer-meta" }, `Answered by ${meta.llm_model}`));
   }
 }
@@ -384,7 +388,7 @@ function setupChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const meta = { llm_model: res.llm_model, reranked: res.reranked };
+      const meta = { llm_model: res.llm_model, reranked: res.reranked, cached: res.cached };
       showBotAnswer(pending, res.answer, res.sources, meta);
       turns.push({ question: q, answer: res.answer, sources: res.sources, meta });
       saveTurns();

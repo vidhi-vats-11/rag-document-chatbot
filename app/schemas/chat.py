@@ -28,6 +28,10 @@ class AskRequest(BaseModel):
     rerank: bool | None = Field(
         default=None, description="Re-rank the retrieved chunks with a cross-encoder. Omit for the server default."
     )
+    use_cache: bool = Field(
+        default=True,
+        description="Reuse a cached answer if the same question was asked before. False always asks the LLM.",
+    )
     history: list[ChatTurnIn] = Field(
         default_factory=list,
         max_length=20,
@@ -61,3 +65,10 @@ class AskResponse(BaseModel):
     grounded: bool = Field(description="False when no relevant context was found and the LLM was not called.")
     llm_model: str | None = Field(default=None, description="Model that wrote the answer; null if the LLM was not called.")
     reranked: bool = Field(default=False, description="True when the chunks were re-ranked before answering.")
+    cached: bool = Field(
+        default=False, description="True when the answer was reused from the answer cache (no LLM request used)."
+    )
+
+
+class CacheClearedResponse(BaseModel):
+    removed: int = Field(description="Number of cached answers deleted.")

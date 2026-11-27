@@ -383,6 +383,8 @@ select:hover { border-color: var(--accent); }
   display: flex; align-items: center; gap: 6px;
 }
 .answer-meta::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.answer-meta.cached { color: var(--text); font-weight: 500; }
+.answer-meta.cached::before { display: none; }
 
 /* ------------------------------------------------------------------ composer */
 .composer { padding: 12px 24px 18px; }

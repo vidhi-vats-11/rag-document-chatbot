@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     # Anthropic only: let the API re-run a refused request on a fallback model.
     anthropic_enable_fallbacks: bool = True
 
+    # --- Answer cache: reuse the answer when the same question is asked again (saves LLM quota)
+    answer_cache_enabled: bool = True
+    # How alike two questions must be (cosine, 0..1) to count as "the same". Keep it high:
+    # "store open?" vs "store close?" already scores 0.86 with all-MiniLM-L6-v2.
+    answer_cache_min_similarity: float = Field(default=0.95, ge=0.5, le=1)
+    answer_cache_max_entries: int = Field(default=1000, ge=1)
+
     @model_validator(mode="after")
     def _check_consistency(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:

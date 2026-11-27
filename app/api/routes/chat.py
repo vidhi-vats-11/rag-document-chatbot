@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_chat_service
 from app.domain import ChatTurn
-from app.schemas.chat import AskRequest, AskResponse, SourceOut
+from app.schemas.chat import AskRequest, AskResponse, CacheClearedResponse, SourceOut
 from app.schemas.common import ErrorResponse
 from app.services.chat_service import ChatService
 
@@ -39,12 +39,14 @@ def ask(body: AskRequest, service: Annotated[ChatService, Depends(get_chat_servi
         history=history,
         llm_model=body.llm_model,
         rerank=body.rerank,
+        use_cache=body.use_cache,
     )
     return AskResponse(
         answer=result.answer,
         grounded=result.grounded,
         llm_model=result.llm_model,
         reranked=result.reranked,
+        cached=result.cached,
         sources=[
             SourceOut(
                 document_id=s.document_id,
@@ -58,3 +60,8 @@ def ask(body: AskRequest, service: Annotated[ChatService, Depends(get_chat_servi
             for s in result.sources
         ],
     )
+
+
+@router.delete("/cache", response_model=CacheClearedResponse, summary="Delete all cached answers")
+def clear_cache(service: Annotated[ChatService, Depends(get_chat_service)]) -> CacheClearedResponse:
+    return CacheClearedResponse(removed=service.clear_cache())

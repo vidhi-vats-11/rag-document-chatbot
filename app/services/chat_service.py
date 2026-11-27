@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from app.core.exceptions import DocumentNotFoundError, InvalidModelError, LLMNotConfiguredError
 from app.domain import ChatTurn, RetrievedChunk
+from app.services.answer_cache_service import AnswerCacheService
 from app.services.document_service import DocumentService
 from app.services.generation_service import GenerationService, extract_citations
 from app.services.retrieval_service import RetrievalService
@@ -24,6 +25,7 @@ class ChatAnswer:
     grounded: bool  # True when the answer was generated from retrieved context
     llm_model: str | None = None  # model that wrote the answer; None when the LLM was not called
     reranked: bool = False  # True when the sources were re-ranked by the cross-encoder
+    cached: bool = False  # True when the answer was reused from the answer cache (no LLM call)
 
 
 class ChatService:
@@ -34,6 +36,7 @@ class ChatService:
         generation: GenerationService,
         history_turns: int = 6,
         llm_models: list[str] | None = None,
+        cache: AnswerCacheService | None = None,
     ) -> None:
         self.documents = documents
         self.retrieval = retrieval
@@ -41,6 +44,7 @@ class ChatService:
         self.history_turns = history_turns
         # Allowed models, default first. Empty = no choice offered (use the configured model).
         self.llm_models = llm_models or []
+        self.cache = cache
 
     def ask(
         self,
@@ -50,11 +54,13 @@ class ChatService:
         history: list[ChatTurn] | None = None,
         llm_model: str | None = None,
         rerank: bool | None = None,
+        use_cache: bool = True,
     ) -> ChatAnswer:
         """Answer `question`. `history` holds earlier turns, oldest first (conversation memory).
 
         `llm_model` picks one of the allowed LLM models for this answer (default: the first).
         `rerank` switches re-ranking on/off for this question (default: from settings).
+        `use_cache` = False always asks the LLM (e.g. to get a fresh answer).
         """
         # Fail fast with a clear message before doing any work.
         if not self.generation.configured:
@@ -87,13 +93,26 @@ class ChatService:
             # Don't ask the LLM with no evidence — that invites a made-up answer.
             return ChatAnswer(NO_RELEVANT_ANSWER, [], grounded=False)
 
+        reranked = any(c.rerank_score is not None for c in chunks)
+
+        # Reuse an earlier answer if the same question found the same passages
+        # (answer_cache_service.py explains how follow-up questions are handled).
+        cacheable = self.cache is not None and use_cache
+        if cacheable:
+            hit = self.cache.lookup(question, document_id, model, chunks, history)
+            if hit:
+                return ChatAnswer(
+                    hit.answer, hit.sources, grounded=True, llm_model=hit.llm_model, reranked=reranked, cached=True
+                )
+
         answer = self.generation.generate(question, chunks, history, model=model)
 
         # Show only the excerpts the model actually cited. If it cited nothing (e.g. it said
         # the documents don't cover the question), listing pages would be misleading.
         cited = extract_citations(answer, len(chunks))
         sources = [chunks[i - 1] for i in cited]
-        reranked = any(c.rerank_score is not None for c in chunks)
+        if cacheable:
+            self.cache.store(question, document_id, model, chunks, answer, sources, history)
         return ChatAnswer(answer, sources, grounded=True, llm_model=model, reranked=reranked)
 
     def _resolve_llm_model(self, requested: str | None) -> str | None:
@@ -106,3 +125,7 @@ class ChatService:
                 f"LLM model '{requested}' is not allowed. Choose one of: {', '.join(self.llm_models)}."
             )
         return requested
+
+    def clear_cache(self) -> int:
+        """Delete every cached answer; returns how many were removed."""
+        return self.cache.clear() if self.cache else 0
