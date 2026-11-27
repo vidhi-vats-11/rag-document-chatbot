@@ -29,5 +29,5 @@ def health(container: Annotated[Container, Depends(get_container)]) -> HealthRes
         llm_provider=s.llm_provider.value,
         ocr_available=container.extractor.ocr_available(),
         embedding_model=container.embedder.model_name,
-        indexed_chunks=container.vector_store.count(),
+        indexed_chunks=container.spaces.count(),
     )

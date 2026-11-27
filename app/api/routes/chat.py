@@ -21,6 +21,7 @@ _SNIPPET_CHARS = 300
     "/ask",
     response_model=AskResponse,
     responses={
+        400: {"model": ErrorResponse, "description": "LLM model not allowed"},
         404: {"model": ErrorResponse, "description": "Selected document not found"},
         429: {"model": ErrorResponse, "description": "LLM rate limit"},
         502: {"model": ErrorResponse, "description": "LLM provider error"},
@@ -31,10 +32,19 @@ _SNIPPET_CHARS = 300
 )
 def ask(body: AskRequest, service: Annotated[ChatService, Depends(get_chat_service)]) -> AskResponse:
     history = [ChatTurn(t.question, t.answer) for t in body.history]
-    result = service.ask(body.question, document_id=body.document_id, top_k=body.top_k, history=history)
+    result = service.ask(
+        body.question,
+        document_id=body.document_id,
+        top_k=body.top_k,
+        history=history,
+        llm_model=body.llm_model,
+        rerank=body.rerank,
+    )
     return AskResponse(
         answer=result.answer,
         grounded=result.grounded,
+        llm_model=result.llm_model,
+        reranked=result.reranked,
         sources=[
             SourceOut(
                 document_id=s.document_id,
@@ -42,6 +52,7 @@ def ask(body: AskRequest, service: Annotated[ChatService, Depends(get_chat_servi
                 page_number=s.page_number,
                 chunk_id=s.chunk_id,
                 score=round(s.score, 4),
+                rerank_score=round(s.rerank_score, 4) if s.rerank_score is not None else None,
                 snippet=s.text[:_SNIPPET_CHARS] + ("…" if len(s.text) > _SNIPPET_CHARS else ""),
             )
             for s in result.sources

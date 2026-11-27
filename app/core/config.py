@@ -51,12 +51,28 @@ class Settings(BaseSettings):
     # --- Embeddings ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = Field(default=32, ge=1)
+    # Models the user may pick per upload (comma-separated). EMBEDDING_MODEL is always allowed.
+    # Each model gets its own Chroma collection, because vectors from different models
+    # have different sizes and meanings and must never be mixed.
+    embedding_model_choices: str = (
+        "sentence-transformers/all-MiniLM-L6-v2,"
+        "sentence-transformers/multi-qa-MiniLM-L6-cos-v1,"
+        "sentence-transformers/all-mpnet-base-v2,"
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
 
     # --- Retrieval ---
     top_k: int = Field(default=5, ge=1, le=50)
     # Cosine similarity in [−1, 1]. If even the BEST match scores below this, the question is
     # treated as unrelated and the LLM is not called. Otherwise all top-K chunks go to the LLM.
     min_relevance_score: float = Field(default=0.15, ge=-1, le=1)
+
+    # --- Re-ranking ---
+    # Vector search is fast but rough. Re-ranking fetches more candidates (RERANK_CANDIDATES),
+    # lets a cross-encoder read each (question, chunk) pair, and keeps the best TOP_K.
+    rerank_enabled: bool = True  # default for each question; the user can switch it per question
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    rerank_candidates: int = Field(default=20, ge=1, le=100)
 
     # --- OCR ---
     tesseract_cmd: str | None = None  # e.g. /opt/homebrew/bin/tesseract; None = use PATH
@@ -74,6 +90,9 @@ class Settings(BaseSettings):
     # --- LLM ---
     llm_provider: LLMProvider = LLMProvider.ANTHROPIC
     llm_model: str = "claude-opus-5-5"
+    # Other models of the same provider the user may pick per question (comma-separated).
+    # LLM_MODEL is always allowed and is the default.
+    llm_model_choices: str = ""
     llm_api_key: SecretStr | None = None
     llm_base_url: str | None = None  # only for OpenAI-compatible servers
     llm_timeout_seconds: float = Field(default=60, gt=0)
@@ -97,6 +116,16 @@ class Settings(BaseSettings):
         return int(self.max_upload_size_mb * 1024 * 1024)
 
     @property
+    def embedding_models(self) -> list[str]:
+        """Allowed embedding models, default first."""
+        return _choices(self.embedding_model, self.embedding_model_choices)
+
+    @property
+    def llm_models(self) -> list[str]:
+        """Allowed LLM models, default first."""
+        return _choices(self.llm_model, self.llm_model_choices)
+
+    @property
     def llm_configured(self) -> bool:
         """An OpenAI-compatible local server (base_url set) may not need a key."""
         has_key = self.llm_api_key is not None and self.llm_api_key.get_secret_value().strip() != ""
@@ -108,6 +137,12 @@ class Settings(BaseSettings):
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.chroma_db_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _choices(default: str, extra: str) -> list[str]:
+    """Split a comma-separated list, put the default first and drop duplicates."""
+    names = [default] + [n.strip() for n in extra.split(",")]
+    return list(dict.fromkeys(n for n in names if n))
 
 
 @lru_cache

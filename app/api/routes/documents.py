@@ -53,6 +53,11 @@ def upload_document(
         max_length=100,
         description='Tesseract language code(s) for scanned pages and images, e.g. "fra" or "hin+eng".',
     ),
+    embedding_model: str | None = Form(
+        default=None,
+        max_length=200,
+        description="Embedding model for indexing; one listed by GET /api/v1/models. Omit for the default.",
+    ),
 ) -> UploadResponse:
     # Read at most max+1 bytes so an oversized upload can't exhaust memory.
     content = file.file.read(service.max_upload_bytes + 1)
@@ -60,7 +65,7 @@ def upload_document(
         raise FileTooLargeError(
             f"File exceeds the maximum upload size of {service.max_upload_bytes / (1024 * 1024):.0f} MB."
         )
-    record, created = service.upload(file.filename, file.content_type, content, ocr_language)
+    record, created = service.upload(file.filename, file.content_type, content, ocr_language, embedding_model)
     if not created:
         response.status_code = status.HTTP_200_OK
     elif record.status is not DocumentStatus.PROCESSING:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.core.exceptions import DocumentNotFoundError, LLMNotConfiguredError
+from app.core.exceptions import DocumentNotFoundError, InvalidModelError, LLMNotConfiguredError
 from app.domain import ChatTurn, RetrievedChunk
 from app.services.document_service import DocumentService
 from app.services.generation_service import GenerationService, extract_citations
@@ -22,6 +22,8 @@ class ChatAnswer:
     answer: str
     sources: list[RetrievedChunk]
     grounded: bool  # True when the answer was generated from retrieved context
+    llm_model: str | None = None  # model that wrote the answer; None when the LLM was not called
+    reranked: bool = False  # True when the sources were re-ranked by the cross-encoder
 
 
 class ChatService:
@@ -31,11 +33,14 @@ class ChatService:
         retrieval: RetrievalService,
         generation: GenerationService,
         history_turns: int = 6,
+        llm_models: list[str] | None = None,
     ) -> None:
         self.documents = documents
         self.retrieval = retrieval
         self.generation = generation
         self.history_turns = history_turns
+        # Allowed models, default first. Empty = no choice offered (use the configured model).
+        self.llm_models = llm_models or []
 
     def ask(
         self,
@@ -43,18 +48,30 @@ class ChatService:
         document_id: str | None = None,
         top_k: int | None = None,
         history: list[ChatTurn] | None = None,
+        llm_model: str | None = None,
+        rerank: bool | None = None,
     ) -> ChatAnswer:
-        """Answer `question`. `history` holds earlier turns, oldest first (conversation memory)."""
+        """Answer `question`. `history` holds earlier turns, oldest first (conversation memory).
+
+        `llm_model` picks one of the allowed LLM models for this answer (default: the first).
+        `rerank` switches re-ranking on/off for this question (default: from settings).
+        """
         # Fail fast with a clear message before doing any work.
         if not self.generation.configured:
             raise LLMNotConfiguredError(
                 "No LLM is configured. Set LLM_PROVIDER, LLM_MODEL and LLM_API_KEY in .env and restart."
             )
+        model = self._resolve_llm_model(llm_model)
 
-        indexed = self.documents.indexed_document_ids()
-        if document_id is not None and document_id not in indexed:
-            raise DocumentNotFoundError("The selected document does not exist or is not indexed.")
-        if not indexed:
+        by_model = self.documents.indexed_by_model()
+        if document_id is not None:
+            # Search only the one model that indexed the chosen document.
+            targets = {m: [document_id] for m, ids in by_model.items() if document_id in ids}
+            if not targets:
+                raise DocumentNotFoundError("The selected document does not exist or is not indexed.")
+        else:
+            targets = {m: None for m in by_model}
+        if not targets:
             return ChatAnswer(NO_DOCUMENTS_ANSWER, [], grounded=False)
 
         # Keep only the most recent turns: enough to follow the conversation, short prompt.
@@ -65,17 +82,27 @@ class ChatService:
         queries = [question]
         if history:
             queries.append(f"{history[-1].question}\n{question}")
-        chunks = self.retrieval.retrieve_any(
-            queries, top_k=top_k, document_ids=[document_id] if document_id else None
-        )
+        chunks = self.retrieval.retrieve_any(queries, targets, top_k=top_k, rerank=rerank)
         if not chunks:
             # Don't ask the LLM with no evidence — that invites a made-up answer.
             return ChatAnswer(NO_RELEVANT_ANSWER, [], grounded=False)
 
-        answer = self.generation.generate(question, chunks, history)
+        answer = self.generation.generate(question, chunks, history, model=model)
 
         # Show only the excerpts the model actually cited. If it cited nothing (e.g. it said
         # the documents don't cover the question), listing pages would be misleading.
         cited = extract_citations(answer, len(chunks))
         sources = [chunks[i - 1] for i in cited]
-        return ChatAnswer(answer, sources, grounded=True)
+        reranked = any(c.rerank_score is not None for c in chunks)
+        return ChatAnswer(answer, sources, grounded=True, llm_model=model, reranked=reranked)
+
+    def _resolve_llm_model(self, requested: str | None) -> str | None:
+        """Only models from the allowed list may be used (each one can cost quota or money)."""
+        requested = (requested or "").strip()
+        if not requested:
+            return self.llm_models[0] if self.llm_models else None
+        if requested not in self.llm_models:
+            raise InvalidModelError(
+                f"LLM model '{requested}' is not allowed. Choose one of: {', '.join(self.llm_models)}."
+            )
+        return requested

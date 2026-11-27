@@ -24,7 +24,9 @@ def test_missing_llm_configuration_returns_503(client_without_llm):
 def test_no_documents_indexed(client, fake_llm):
     res = ask(client, "What is the refund policy?")
     assert res.status_code == 200
-    assert res.json() == {"answer": NO_DOCUMENTS_ANSWER, "sources": [], "grounded": False}
+    assert res.json() == {
+        "answer": NO_DOCUMENTS_ANSWER, "sources": [], "grounded": False, "llm_model": None, "reranked": False
+    }
     assert fake_llm.calls == []
 
 

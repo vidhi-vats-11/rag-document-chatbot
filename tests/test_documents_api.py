@@ -142,4 +142,4 @@ def test_delete_rejects_malformed_id(client):
 def test_index_page_renders(client):
     res = client.get("/")
     assert res.status_code == 200
-    assert "Ask a question" in res.text
+    assert "What would you like to know?" in res.text

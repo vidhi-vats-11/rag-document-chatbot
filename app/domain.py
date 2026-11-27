@@ -63,6 +63,7 @@ class RetrievedChunk:
     text: str
     page_number: int | None
     score: float  # cosine similarity, higher = more relevant
+    rerank_score: float | None = None  # cross-encoder score in [0, 1]; None when not re-ranked
 
 
 @dataclass
@@ -80,6 +81,7 @@ class DocumentRecord:
     error_message: str | None = None
     warnings: list[str] = field(default_factory=list)
     ocr_language: str | None = None  # Tesseract code(s) used for OCR, e.g. "hin+eng"
+    embedding_model: str | None = None  # model that made this document's vectors
 
 
 @dataclass(frozen=True)

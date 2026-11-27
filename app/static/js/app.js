@@ -56,7 +56,7 @@ async function loadHealth() {
     const problems = [];
     if (!h.llm_configured) problems.push("LLM not configured");
     if (!h.ocr_available) problems.push("OCR unavailable");
-    pill.textContent = problems.length ? problems.join(" · ") : `Ready · ${h.llm_provider}`;
+    pill.textContent = problems.length ? problems.join(" · ") : "Ready";
     pill.className = "pill " + (problems.length ? "warn" : "ok");
   } catch {
     pill.textContent = "Server unreachable";
@@ -81,6 +81,23 @@ function reportFinished(d) {
   }
 }
 
+const FILE_LABELS = { pdf: "PDF", docx: "DOC", image: "IMG" };
+
+// Built with DOM calls (not innerHTML), like everything else on this page.
+function trashIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" })) {
+    svg.setAttribute(k, v);
+  }
+  for (const d of ["M3 6h18", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2", "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"]) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 async function loadDocuments() {
   let data;
   try {
@@ -92,6 +109,7 @@ async function loadDocuments() {
   const list = $("doc-list");
   list.replaceChildren();
   $("doc-empty").hidden = data.total > 0;
+  $("doc-count").textContent = data.total;
 
   const scope = $("scope");
   const previous = scope.value;
@@ -104,13 +122,15 @@ async function loadDocuments() {
       d.page_count ? `${d.page_count} page${d.page_count > 1 ? "s" : ""}` : null,
       d.chunk_count ? `${d.chunk_count} chunk${d.chunk_count > 1 ? "s" : ""}` : null,
       d.ocr_used ? (d.ocr_language && d.ocr_language !== "eng" ? `OCR (${d.ocr_language})` : "OCR") : null,
+      d.embedding_model ? `embedding: ${shortModel(d.embedding_model)}` : null,
     ].filter(Boolean).join(" · ");
 
     list.append(
       el("li", { class: "doc" },
-        el("span", { class: "doc-name" }, d.filename, el("span", { class: `badge ${d.status}` }, d.status)),
-        el("button", { class: "link", type: "button", title: "Delete document", onclick: () => deleteDocument(d) }, "Delete"),
-        el("span", { class: "doc-meta" }, meta),
+        el("span", { class: `file-icon ${d.file_kind}`, "aria-hidden": "true" }, FILE_LABELS[d.file_kind] || "FILE"),
+        el("span", { class: "doc-name", title: d.filename }, d.filename),
+        el("button", { class: "link", type: "button", title: `Delete "${d.filename}"`, "aria-label": `Delete ${d.filename}`, onclick: () => deleteDocument(d) }, trashIcon()),
+        el("span", { class: "doc-meta" }, el("span", { class: `badge ${d.status}` }, d.status), " ", meta),
         d.error_message ? el("span", { class: "doc-error" }, d.error_message) : null,
       ),
     );
@@ -146,38 +166,26 @@ async function deleteDocument(doc) {
   loadHealth();
 }
 
-// Friendly names for common Tesseract codes; anything else is shown by its code.
-const LANGUAGE_NAMES = {
-  eng: "English", hin: "Hindi", mar: "Marathi", ben: "Bengali", guj: "Gujarati", pan: "Punjabi",
-  tam: "Tamil", tel: "Telugu", kan: "Kannada", mal: "Malayalam", ori: "Odia", urd: "Urdu",
-  san: "Sanskrit", nep: "Nepali", ara: "Arabic", fra: "French", deu: "German", spa: "Spanish",
-  por: "Portuguese", ita: "Italian", nld: "Dutch", rus: "Russian", ukr: "Ukrainian", pol: "Polish",
-  tur: "Turkish", ell: "Greek", heb: "Hebrew", fas: "Persian", chi_sim: "Chinese (Simplified)",
-  chi_tra: "Chinese (Traditional)", jpn: "Japanese", kor: "Korean", tha: "Thai", vie: "Vietnamese",
-  ind: "Indonesian", msa: "Malay", swe: "Swedish", nor: "Norwegian", dan: "Danish", fin: "Finnish",
-};
+// ---------------------------------------------------------------- model choices
 
-async function loadOcrLanguages() {
-  const select = $("ocr-language");
+// "sentence-transformers/all-MiniLM-L6-v2" -> "all-MiniLM-L6-v2"
+const shortModel = (name) => name.split("/").pop();
+
+async function loadModels() {
   let data;
   try {
-    data = await api("/documents/ocr-languages");
+    data = await api("/models");
   } catch {
-    return; // keep the default "English" option
+    return; // keep the "Default" options; the server then uses its defaults
   }
-  const named = [];
-  const other = [];
-  for (const code of data.languages) {
-    if (code === "eng") continue;
-    // Pair every language with English: most documents mix in some English words.
-    const option = { value: `${code}+eng`, label: LANGUAGE_NAMES[code] ? `${LANGUAGE_NAMES[code]} + English` : `${code} + English` };
-    (LANGUAGE_NAMES[code] ? named : other).push(option);
-  }
-  named.sort((a, b) => a.label.localeCompare(b.label));
-  other.sort((a, b) => a.label.localeCompare(b.label));
-  select.replaceChildren(el("option", { value: "" }, "English"));
-  if (named.length) select.append(el("optgroup", { label: "Common" }, ...named.map((o) => el("option", { value: o.value }, o.label))));
-  if (other.length) select.append(el("optgroup", { label: "All other languages (by code)" }, ...other.map((o) => el("option", { value: o.value }, o.label))));
+  const fill = (select, names, defaultName) => {
+    select.replaceChildren(
+      ...names.map((n) => el("option", { value: n }, n === defaultName ? `${shortModel(n)} (default)` : shortModel(n))),
+    );
+    select.value = defaultName;
+  };
+  fill($("embedding-model"), data.embedding_models, data.default_embedding_model);
+  fill($("llm-model"), data.llm_models, data.default_llm_model);
 }
 
 function setupUpload() {
@@ -211,8 +219,8 @@ function setupUpload() {
 
     const form = new FormData();
     form.append("file", file);
-    const language = $("ocr-language").value;
-    if (language) form.append("ocr_language", language);
+    const embeddingModel = $("embedding-model").value;
+    if (embeddingModel) form.append("embedding_model", embeddingModel);
     button.disabled = true;
     setStatus(`Uploading "${file.name}"…`, "info");
     try {
@@ -269,11 +277,23 @@ function loadTurns() {
   }
 }
 
+// The welcome screen (with example questions) shows only while the chat is empty.
+function updateWelcome() {
+  $("welcome").hidden = $("conversation").children.length > 0;
+}
+
 function addMessage(kind, text) {
   const node = el("div", { class: `msg ${kind}` }, text);
   $("conversation").append(node);
+  updateWelcome();
   node.scrollIntoView({ behavior: "smooth", block: "end" });
   return node;
+}
+
+// Let the question box grow with its text (up to the CSS max-height).
+function autoGrow(textarea) {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function renderSources(sources) {
@@ -283,7 +303,8 @@ function renderSources(sources) {
     const where = s.page_number != null ? `${s.filename}, page ${s.page_number}` : s.filename;
     box.append(
       el("details", {},
-        el("summary", {}, `${where} (relevance ${s.score.toFixed(2)})`),
+        // Re-ranking happens on the server; show its score when there is one.
+        el("summary", {}, `${where} (relevance ${(s.rerank_score ?? s.score).toFixed(2)})`),
         el("blockquote", {}, s.snippet),
       ),
     );
@@ -291,11 +312,14 @@ function renderSources(sources) {
   return box;
 }
 
-function showBotAnswer(node, answer, sources) {
+function showBotAnswer(node, answer, sources, meta) {
   node.className = "msg bot";
   node.textContent = answer;
   const box = renderSources(sources || []);
   if (box) node.append(box);
+  if (meta?.llm_model) {
+    node.append(el("div", { class: "answer-meta" }, `Answered by ${meta.llm_model}`));
+  }
 }
 
 function setupChat() {
@@ -306,15 +330,28 @@ function setupChat() {
   turns = loadTurns();
   for (const t of turns) {
     addMessage("user", t.question);
-    showBotAnswer(addMessage("bot", ""), t.answer, t.sources);
+    showBotAnswer(addMessage("bot", ""), t.answer, t.sources, t.meta);
   }
+
+  updateWelcome();
 
   $("new-chat-btn").addEventListener("click", () => {
     turns = [];
     saveTurns();
     $("conversation").replaceChildren();
+    updateWelcome();
     question.focus();
   });
+
+  // Example questions: clicking one asks it straight away.
+  for (const chip of document.querySelectorAll("#suggestions .chip")) {
+    chip.addEventListener("click", () => {
+      question.value = chip.dataset.q;
+      form.requestSubmit();
+    });
+  }
+
+  question.addEventListener("input", () => autoGrow(question));
 
   question.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -330,14 +367,16 @@ function setupChat() {
 
     addMessage("user", q);
     question.value = "";
+    autoGrow(question);
     button.disabled = true;
-    const pending = addMessage("bot thinking", "Searching your documents…");
+    const pending = addMessage("bot thinking", "Searching your documents");
 
     const payload = {
       question: q,
       history: turns.slice(-SEND_TURNS).map((t) => ({ question: t.question, answer: t.answer.slice(0, 10000) })),
     };
     if ($("scope").value) payload.document_id = $("scope").value;
+    if ($("llm-model").value) payload.llm_model = $("llm-model").value;
 
     try {
       const res = await api("/chat/ask", {
@@ -345,8 +384,9 @@ function setupChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      showBotAnswer(pending, res.answer, res.sources);
-      turns.push({ question: q, answer: res.answer, sources: res.sources });
+      const meta = { llm_model: res.llm_model, reranked: res.reranked };
+      showBotAnswer(pending, res.answer, res.sources, meta);
+      turns.push({ question: q, answer: res.answer, sources: res.sources, meta });
       saveTurns();
     } catch (err) {
       pending.className = "msg bot error";
@@ -358,10 +398,48 @@ function setupChat() {
   });
 }
 
+// ---------------------------------------------------------------- theme
+
+// Five choices. "auto" follows the computer's light/dark setting (and changes with it).
+// The choice is remembered in this browser; index.html applies it before the page draws.
+const THEME_KEY = "rag-theme";
+
+function savedTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function applyTheme(choice) {
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = choice === "auto" ? (dark ? "dark" : "light") : choice;
+  for (const btn of document.querySelectorAll(".theme-btn")) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.choice === choice));
+  }
+}
+
+function setupTheme() {
+  for (const btn of document.querySelectorAll(".theme-btn")) {
+    btn.addEventListener("click", () => {
+      try {
+        localStorage.setItem(THEME_KEY, btn.dataset.choice);
+      } catch {
+        // Private mode: the theme still changes, it just isn't remembered.
+      }
+      applyTheme(btn.dataset.choice);
+    });
+  }
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(savedTheme()));
+  applyTheme(savedTheme());
+}
+
 // ---------------------------------------------------------------- init
 
+setupTheme();
 setupUpload();
 setupChat();
 loadHealth();
 loadDocuments();
-loadOcrLanguages();
+loadModels();

@@ -86,10 +86,14 @@ class GenerationService:
         return self.llm is not None
 
     def generate(
-        self, question: str, chunks: list[RetrievedChunk], history: list[ChatTurn] | None = None
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        history: list[ChatTurn] | None = None,
+        model: str | None = None,
     ) -> str:
         if self.llm is None:
             raise LLMNotConfiguredError(
                 "No LLM is configured. Set LLM_PROVIDER, LLM_MODEL and LLM_API_KEY in .env and restart."
             )
-        return self.llm.complete(SYSTEM_PROMPT, build_user_message(question, chunks, history))
+        return self.llm.complete(SYSTEM_PROMPT, build_user_message(question, chunks, history), model=model)

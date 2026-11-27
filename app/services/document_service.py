@@ -23,9 +23,8 @@ from pathlib import Path
 from app.core.exceptions import AppError, DocumentBusyError, DocumentNotFoundError, ExtractionError
 from app.domain import DocumentRecord, DocumentStatus
 from app.repositories.document_repository import DocumentRepository
-from app.repositories.vector_store import VectorStore
 from app.services.chunking_service import ChunkingService
-from app.services.embedding_service import EmbeddingService
+from app.services.embedding_spaces import EmbeddingSpaces
 from app.services.extraction_service import ExtractionService
 from app.utils.file_validation import validate_upload
 
@@ -38,19 +37,17 @@ class DocumentService:
         upload_dir: Path,
         max_upload_bytes: int,
         documents: DocumentRepository,
-        vector_store: VectorStore,
+        spaces: EmbeddingSpaces,
         extractor: ExtractionService,
         chunker: ChunkingService,
-        embedder: EmbeddingService,
         background: bool = True,
     ) -> None:
         self.upload_dir = upload_dir.resolve()
         self.max_upload_bytes = max_upload_bytes
         self.documents = documents
-        self.vector_store = vector_store
+        self.spaces = spaces
         self.extractor = extractor
         self.chunker = chunker
-        self.embedder = embedder
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="indexer") if background else None
         self._lock = threading.Lock()  # makes "is it already uploaded?" + "save" one step
 
@@ -62,25 +59,35 @@ class DocumentService:
         content_type: str | None,
         content: bytes,
         ocr_language: str | None = None,
+        embedding_model: str | None = None,
     ) -> tuple[DocumentRecord, bool]:
         """Validate and store a file, then index it (in the background by default).
 
         Returns (record, created). `created` is False when an identical file is
-        already indexed or already being indexed, so no work is repeated.
+        already indexed with the same embedding model, or is being indexed, so no
+        work is repeated. Uploading an indexed file with a *different* embedding
+        model re-indexes it with the new model.
         Validation problems raise; extraction problems are recorded as a FAILED
         document so the user can see what went wrong.
         """
         validated = validate_upload(filename, content_type, content, self.max_upload_bytes)
         language = self.extractor.normalize_language(ocr_language)
+        model = self.spaces.resolve(embedding_model)
 
         # Stable ID from the file's bytes: same file -> same ID -> no duplicate work.
         document_id = hashlib.sha256(validated.content).hexdigest()[:32]
 
         with self._lock:
-            existing = self.documents.get(document_id)
-            if existing and existing.status in (DocumentStatus.INDEXED, DocumentStatus.PROCESSING):
+            existing = self._with_model(self.documents.get(document_id))
+            if existing and (
+                existing.status is DocumentStatus.PROCESSING
+                or (existing.status is DocumentStatus.INDEXED and existing.embedding_model == model)
+            ):
                 logger.info("Document %s already %s; nothing to redo", document_id, existing.status.value)
                 return existing, False
+            if existing and existing.embedding_model != model:
+                # Re-indexing with another model: remove the vectors made by the old one.
+                self.spaces.get(existing.embedding_model).store.delete_document(document_id)
 
             # Server-generated name: never derived from user input, so no path traversal.
             stored_filename = f"{document_id}{validated.extension}"
@@ -96,6 +103,7 @@ class DocumentService:
                 status=DocumentStatus.PROCESSING,
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 ocr_language=language,
+                embedding_model=model,
             )
             self.documents.save(record)
 
@@ -104,7 +112,7 @@ class DocumentService:
 
     def resume_unfinished(self) -> int:
         """Restart indexing for documents left "processing" when the server stopped."""
-        unfinished = self.documents.list_by_status(DocumentStatus.PROCESSING)
+        unfinished = [self._with_model(r) for r in self.documents.list_by_status(DocumentStatus.PROCESSING)]
         for record in unfinished:
             path = self._safe_path(record.stored_filename)
             if path.exists():
@@ -136,7 +144,7 @@ class DocumentService:
         except AppError as exc:
             self._mark_failed(record, exc.message)
         except Exception:
-            logger.exception("Unexpected error while indexing %s", document_id)
+            logger.exception("Unexpected error while indexing %s", record.document_id)
             self._mark_failed(record, "An unexpected error occurred while indexing this document.")
 
     def _index(self, record: DocumentRecord, content: bytes) -> None:
@@ -154,19 +162,21 @@ class DocumentService:
             raise ExtractionError("No readable text was found in this document." + hint)
 
         chunks = self.chunker.chunk_pages(record.document_id, record.filename, extraction.pages)
-        embeddings = self.embedder.embed_documents([c.text for c in chunks])
+        space = self.spaces.get(record.embedding_model)
+        embeddings = space.embedder.embed_documents([c.text for c in chunks])
 
         # Remove stale vectors from any previous failed attempt, then write fresh ones.
-        self.vector_store.delete_document(record.document_id)
-        self.vector_store.upsert_chunks(chunks, embeddings)
+        space.store.delete_document(record.document_id)
+        space.store.upsert_chunks(chunks, embeddings)
 
         record.chunk_count = len(chunks)
         record.status = DocumentStatus.INDEXED
         record.error_message = None
         self.documents.save(record)
         logger.info(
-            "Indexed %s (%s): %d pages, %d chunks, ocr=%s",
+            "Indexed %s (%s): %d pages, %d chunks, ocr=%s, embedding=%s",
             record.document_id, record.filename, record.page_count, record.chunk_count, record.ocr_used,
+            record.embedding_model,
         )
 
     def _mark_failed(self, record: DocumentRecord, message: str) -> None:
@@ -174,16 +184,16 @@ class DocumentService:
         record.status = DocumentStatus.FAILED
         record.error_message = message
         record.chunk_count = 0
-        self.vector_store.delete_document(record.document_id)
+        self.spaces.get(record.embedding_model).store.delete_document(record.document_id)
         self.documents.save(record)
 
     # ------------------------------------------------------------------ read / delete
 
     def list_documents(self) -> list[DocumentRecord]:
-        return self.documents.list_all()
+        return [self._with_model(r) for r in self.documents.list_all()]
 
     def get_document(self, document_id: str) -> DocumentRecord:
-        record = self.documents.get(document_id)
+        record = self._with_model(self.documents.get(document_id))
         if record is None:
             raise DocumentNotFoundError("Document not found.")
         return record
@@ -191,19 +201,33 @@ class DocumentService:
     def indexed_document_ids(self) -> set[str]:
         return {d.document_id for d in self.documents.list_all() if d.status is DocumentStatus.INDEXED}
 
+    def indexed_by_model(self) -> dict[str, list[str]]:
+        """Indexed document IDs grouped by the embedding model that indexed them."""
+        groups: dict[str, list[str]] = {}
+        for d in self.list_documents():
+            if d.status is DocumentStatus.INDEXED:
+                groups.setdefault(d.embedding_model, []).append(d.document_id)
+        return groups
+
     def delete(self, document_id: str) -> None:
         """Remove vectors, the stored file, and the record."""
         record = self.get_document(document_id)
         if record.status is DocumentStatus.PROCESSING:
             # Deleting now would race with the worker, which would write the record back.
             raise DocumentBusyError("This document is still being indexed. Wait until it finishes, then delete it.")
-        self.vector_store.delete_document(document_id)
+        self.spaces.get(record.embedding_model).store.delete_document(document_id)
         path = self._safe_path(record.stored_filename)
         path.unlink(missing_ok=True)
         self.documents.delete(document_id)
         logger.info("Deleted document %s", document_id)
 
     # ------------------------------------------------------------------ helpers
+
+    def _with_model(self, record: DocumentRecord | None) -> DocumentRecord | None:
+        """Documents indexed before models could be chosen used the default model."""
+        if record is not None and record.embedding_model is None:
+            record.embedding_model = self.spaces.default_model
+        return record
 
     def _safe_path(self, stored_filename: str) -> Path:
         """Resolve a path and refuse anything that escapes the upload directory."""

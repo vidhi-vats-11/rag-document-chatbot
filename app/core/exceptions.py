@@ -48,6 +48,13 @@ class DocumentBusyError(AppError):
     error_code = "document_busy"
 
 
+class InvalidModelError(AppError):
+    """The request asked for a model that is not in the allowed list."""
+
+    status_code = 400
+    error_code = "invalid_model"
+
+
 class LLMNotConfiguredError(AppError):
     status_code = 503
     error_code = "llm_not_configured"

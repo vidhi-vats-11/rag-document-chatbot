@@ -26,7 +26,9 @@ _BUSY_MESSAGE = "The AI service is busy right now. Please try again in a moment.
 
 
 class LLMClient(Protocol):
-    def complete(self, system_prompt: str, user_message: str) -> str: ...
+    def complete(self, system_prompt: str, user_message: str, model: str | None = None) -> str:
+        """`model` overrides the configured model for this one request."""
+        ...
 
 
 class AnthropicClient:
@@ -46,10 +48,11 @@ class AnthropicClient:
         self._effort = settings.llm_effort
         self._fallbacks = settings.anthropic_enable_fallbacks
 
-    def complete(self, system_prompt: str, user_message: str) -> str:
+    def complete(self, system_prompt: str, user_message: str, model: str | None = None) -> str:
         anthropic = self._anthropic
+        model = model or self._model
         kwargs: dict = {
-            "model": self._model,
+            "model": model,
             "max_tokens": self._max_tokens,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_message}],
@@ -69,7 +72,7 @@ class AnthropicClient:
         except anthropic.AuthenticationError as exc:
             raise LLMNotConfiguredError("The LLM API key was rejected. Check LLM_API_KEY.") from exc
         except anthropic.NotFoundError as exc:
-            raise LLMProviderError(f"LLM model '{self._model}' was not found. Check LLM_MODEL.") from exc
+            raise LLMProviderError(f"LLM model '{model}' was not found. Check LLM_MODEL.") from exc
         except anthropic.APIStatusError as exc:
             logger.error("Anthropic API error %s: %s", exc.status_code, getattr(exc, "type", ""))
             if exc.status_code in _BUSY_STATUSES:
@@ -104,11 +107,12 @@ class OpenAICompatibleClient:
         self._model = settings.llm_model
         self._max_tokens = settings.llm_max_tokens
 
-    def complete(self, system_prompt: str, user_message: str) -> str:
+    def complete(self, system_prompt: str, user_message: str, model: str | None = None) -> str:
         openai = self._openai
+        model = model or self._model
         try:
             response = self._client.chat.completions.create(
-                model=self._model,
+                model=model,
                 max_tokens=self._max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -121,6 +125,8 @@ class OpenAICompatibleClient:
             raise LLMRateLimitError("The language model is rate-limited. Please wait a moment and retry.") from exc
         except openai.AuthenticationError as exc:
             raise LLMNotConfiguredError("The LLM API key was rejected. Check LLM_API_KEY.") from exc
+        except openai.NotFoundError as exc:
+            raise LLMProviderError(f"LLM model '{model}' was not found. Check LLM_MODEL_CHOICES.") from exc
         except openai.APIStatusError as exc:
             logger.error("OpenAI-compatible API error %s", exc.status_code)
             if exc.status_code in _BUSY_STATUSES:

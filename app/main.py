@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.api.routes import chat, documents, health
+from app.api.routes import chat, documents, health, models
 from app.core.config import Settings, get_settings
 from app.core.container import Container, build_container
 from app.core.exceptions import AppError
@@ -39,6 +39,9 @@ def create_app(settings: Settings | None = None, container: Container | None = N
             app.state.container = build_container(settings)
             logger.info("Loading embedding model (first run downloads it)...")
             app.state.container.embedder.warm_up()
+            if settings.rerank_enabled:
+                logger.info("Loading re-ranking model (first run downloads it)...")
+                app.state.container.reranker.warm_up()
         c: Container = app.state.container
         resumed = c.document_service.resume_unfinished()
         if resumed:
@@ -65,6 +68,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(health.router)
     app.include_router(documents.router, prefix=API_PREFIX)
     app.include_router(chat.router, prefix=API_PREFIX)
+    app.include_router(models.router, prefix=API_PREFIX)
 
     app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=APP_DIR / "templates")
@@ -74,10 +78,24 @@ def create_app(settings: Settings | None = None, container: Container | None = N
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"app_name": settings.app_name, "max_upload_mb": settings.max_upload_size_mb},
+            {
+                "app_name": settings.app_name,
+                "max_upload_mb": settings.max_upload_size_mb,
+                "asset_version": _asset_version(),
+            },
         )
 
     return app
+
+
+def _asset_version() -> str:
+    """Changes whenever app.js or style.css changes.
+
+    It is added to their URLs (app.js?v=...), so the browser downloads the new file
+    instead of running an old copy it saved earlier (its "cache").
+    """
+    files = [APP_DIR / "static" / "js" / "app.js", APP_DIR / "static" / "css" / "style.css"]
+    return str(max(int(f.stat().st_mtime) for f in files))
 
 
 def _register_exception_handlers(app: FastAPI) -> None:

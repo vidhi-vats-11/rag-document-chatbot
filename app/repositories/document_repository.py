@@ -30,16 +30,17 @@ CREATE TABLE IF NOT EXISTS documents (
     ocr_used        INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT,
     warnings        TEXT NOT NULL DEFAULT '[]',
-    ocr_language    TEXT
+    ocr_language    TEXT,
+    embedding_model TEXT
 )
 """
 
 # Columns added after the first release. Older databases get them via ALTER TABLE.
-_ADDED_COLUMNS = {"ocr_language": "TEXT"}
+_ADDED_COLUMNS = {"ocr_language": "TEXT", "embedding_model": "TEXT"}
 
 _COLUMNS = (
     "document_id, filename, stored_filename, file_kind, size_bytes, status, created_at, "
-    "page_count, chunk_count, ocr_used, error_message, warnings, ocr_language"
+    "page_count, chunk_count, ocr_used, error_message, warnings, ocr_language, embedding_model"
 )
 
 
@@ -80,10 +81,11 @@ class DocumentRepository:
             record.error_message,
             json.dumps(record.warnings),
             record.ocr_language,
+            record.embedding_model,
         )
         with self._lock, self._connect() as conn:
             conn.execute(
-                f"INSERT OR REPLACE INTO documents ({_COLUMNS}) VALUES ({', '.join('?' * 13)})",
+                f"INSERT OR REPLACE INTO documents ({_COLUMNS}) VALUES ({', '.join('?' * len(values))})",
                 values,
             )
 
@@ -129,4 +131,5 @@ class DocumentRepository:
             error_message=row["error_message"],
             warnings=json.loads(row["warnings"]),
             ocr_language=row["ocr_language"],
+            embedding_model=row["embedding_model"],
         )

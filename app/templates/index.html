@@ -4,65 +4,130 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }}</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%232f5bea'/></svg>">
-  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%234f46e5'/><stop offset='1' stop-color='%237c3aed'/></linearGradient></defs><rect width='16' height='16' rx='4' fill='url(%23g)'/></svg>">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ asset_version }}">
+  <script>
+    // Set the theme before the page draws, so it never flashes the wrong colours.
+    (function () {
+      var choice = "auto";
+      try { choice = localStorage.getItem("rag-theme") || "auto"; } catch (e) {}
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = choice === "auto" ? (dark ? "dark" : "light") : choice;
+    })();
+  </script>
 </head>
 <body>
-  <header class="topbar">
-    <h1>{{ app_name }}</h1>
-    <div class="topbar-right">
-      <span id="health" class="pill">Checking…</span>
-      <a href="/docs" target="_blank" rel="noopener">API docs</a>
-    </div>
-  </header>
+  <div class="app">
+    <!-- Sidebar: brand, upload, documents -->
+    <aside class="sidebar" aria-labelledby="docs-title">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+        </span>
+        <div>
+          <h1>{{ app_name }}</h1>
+          <p class="tagline">Ask questions. Get answers from your files.</p>
+        </div>
+      </div>
 
-  <main class="layout">
-    <!-- Documents column -->
-    <section class="panel" aria-labelledby="docs-title">
-      <h2 id="docs-title">Documents</h2>
-
-      <form id="upload-form" class="upload">
+      <form id="upload-form" class="upload card">
         <label for="file-input" class="dropzone" id="dropzone">
-          <strong>Choose a file</strong> or drag it here
-          <span class="muted">PDF (incl. scanned), PNG, JPG, DOCX · max {{ max_upload_mb | int }} MB</span>
+          <span class="dz-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>
+          </span>
+          <strong>Choose a file</strong>
+          <span class="dz-hint">or drag it here</span>
+          <span class="dz-types">PDF · Scanned PDF · PNG · JPG · DOCX · max {{ max_upload_mb | int }} MB</span>
         </label>
         <input id="file-input" type="file" name="file"
                accept=".pdf,.png,.jpg,.jpeg,.docx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-        <label for="ocr-language" class="field-label">Language of scanned pages and images</label>
-        <select id="ocr-language">
-          <option value="">English</option>
+        <label for="embedding-model" class="field-label">Embedding model <span class="hint">· turns text into numbers for search</span></label>
+        <select id="embedding-model">
+          <option value="">Default</option>
         </select>
-        <button type="submit" id="upload-btn" disabled>Upload &amp; index</button>
+        <button type="submit" id="upload-btn" class="primary" disabled>Upload &amp; index</button>
       </form>
       <div id="upload-status" class="status" role="status" aria-live="polite"></div>
 
+      <div class="section-head">
+        <h2 id="docs-title">Your documents</h2>
+        <span id="doc-count" class="count">0</span>
+      </div>
       <ul id="doc-list" class="doc-list" aria-label="Uploaded documents"></ul>
-      <p id="doc-empty" class="muted">No documents yet.</p>
-    </section>
+      <p id="doc-empty" class="empty-docs">No documents yet. Upload one to get started.</p>
 
-    <!-- Chat column -->
-    <section class="panel chat" aria-labelledby="chat-title">
-      <div class="panel-head">
-        <h2 id="chat-title">Ask a question</h2>
-        <button type="button" id="new-chat-btn" class="secondary" title="Forget this conversation and start again">New chat</button>
+      <div class="theme-picker" role="group" aria-label="Colour theme">
+        <span>Theme</span>
+        <div class="theme-options">
+          <button type="button" class="theme-btn" data-choice="auto" title="Auto (follow my computer)" aria-label="Auto theme"></button>
+          <button type="button" class="theme-btn" data-choice="light" title="Light" aria-label="Light theme"></button>
+          <button type="button" class="theme-btn" data-choice="soft" title="Soft (a little light)" aria-label="Soft theme"></button>
+          <button type="button" class="theme-btn" data-choice="dim" title="Dim (a little dark)" aria-label="Dim theme"></button>
+          <button type="button" class="theme-btn" data-choice="dark" title="Dark" aria-label="Dark theme"></button>
+        </div>
       </div>
 
-      <div id="conversation" class="conversation" aria-live="polite"></div>
+      <footer class="sidebar-foot">
+        <span id="health" class="pill">Checking…</span>
+        <a href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+      </footer>
+    </aside>
 
-      <form id="ask-form" class="ask">
-        <label for="scope" class="sr-only">Search scope</label>
-        <select id="scope">
-          <option value="">All indexed documents</option>
-        </select>
-        <div class="ask-row">
-          <label for="question" class="sr-only">Question</label>
-          <textarea id="question" rows="2" maxlength="2000" placeholder="e.g. What are the payment terms?" required></textarea>
-          <button type="submit" id="ask-btn">Ask</button>
+    <!-- Chat -->
+    <main class="chat" aria-labelledby="chat-title">
+      <header class="chat-head">
+        <h2 id="chat-title">Chat</h2>
+        <div class="chat-controls">
+          <label class="control">
+            <span>Search in</span>
+            <select id="scope">
+              <option value="">All indexed documents</option>
+            </select>
+          </label>
+          <label class="control">
+            <span>AI model</span>
+            <select id="llm-model">
+              <option value="">Default model</option>
+            </select>
+          </label>
+          <button type="button" id="new-chat-btn" class="ghost" title="Forget this conversation and start again">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            New chat
+          </button>
         </div>
-      </form>
-    </section>
-  </main>
+      </header>
 
-  <script src="{{ url_for('static', path='js/app.js') }}"></script>
+      <div class="chat-body">
+        <section id="welcome" class="welcome">
+          <div class="welcome-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>
+          </div>
+          <h3>What would you like to know?</h3>
+          <p>Answers come only from your uploaded documents, with the file and page they came from.</p>
+          <div class="suggestions" id="suggestions">
+            <button type="button" class="chip" data-q="Summarise the main points of my documents.">Summarise my documents</button>
+            <button type="button" class="chip" data-q="What are the key dates and deadlines mentioned?">Key dates and deadlines</button>
+            <button type="button" class="chip" data-q="What are the payment or refund terms?">Payment or refund terms</button>
+            <button type="button" class="chip" data-q="Who are the people or organisations mentioned, and what are their roles?">People and their roles</button>
+          </div>
+        </section>
+        <div id="conversation" class="conversation" aria-live="polite"></div>
+      </div>
+
+      <form id="ask-form" class="composer">
+        <div class="composer-box">
+          <label for="question" class="sr-only">Question</label>
+          <textarea id="question" rows="1" maxlength="2000" placeholder="Ask anything about your documents…" required></textarea>
+          <button type="submit" id="ask-btn" class="send" title="Send (Enter)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            <span class="sr-only">Ask</span>
+          </button>
+        </div>
+        <p class="composer-hint">Enter to send · Shift + Enter for a new line</p>
+      </form>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', path='js/app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

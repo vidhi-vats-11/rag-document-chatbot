@@ -20,6 +20,7 @@ class DocumentOut(BaseModel):
     error_message: str | None = None
     warnings: list[str] = Field(default_factory=list)
     ocr_language: str | None = None
+    embedding_model: str | None = None
 
     @classmethod
     def from_record(cls, r: DocumentRecord) -> "DocumentOut":
@@ -37,6 +38,7 @@ class DocumentOut(BaseModel):
             error_message=r.error_message,
             warnings=r.warnings,
             ocr_language=r.ocr_language,
+            embedding_model=r.embedding_model,
         )
 
 

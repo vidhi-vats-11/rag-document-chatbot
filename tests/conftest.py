@@ -4,6 +4,7 @@ Tests never call a real LLM and, except for tests marked `slow`, never load the
 real embedding model. Instead they use:
 - FakeEncoder: a deterministic bag-of-words "embedding" (texts sharing words are similar)
 - FakeLLM: records prompts and returns a canned answer (or raises a chosen error)
+- FakeReranker: scores a (question, chunk) pair by how many question words the chunk contains
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from app.core.config import Settings
 from app.core.container import Container, build_container
 from app.main import create_app
 from app.services.embedding_service import EmbeddingService
+from app.services.rerank_service import RerankService
 
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
 requires_tesseract = pytest.mark.skipif(not TESSERACT_AVAILABLE, reason="Tesseract OCR not installed")
@@ -59,12 +61,35 @@ class FakeLLM:
         self.answer = answer
         self.error = error
         self.calls: list[tuple[str, str]] = []
+        self.models: list[str | None] = []  # model asked for in each call
 
-    def complete(self, system_prompt: str, user_message: str) -> str:
+    def complete(self, system_prompt: str, user_message: str, model: str | None = None) -> str:
         self.calls.append((system_prompt, user_message))
+        self.models.append(model)
         if self.error:
             raise self.error
         return self.answer
+
+
+class FakeReranker:
+    """Share of the query's (non-stopword) words that appear in the chunk, in [0, 1]."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[tuple[str, str]]] = []
+
+    def predict(self, inputs: Any, **kwargs: Any) -> np.ndarray:
+        pairs = list(inputs)
+        self.calls.append(pairs)
+        scores = []
+        for query, text in pairs:
+            q = {w for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in _STOPWORDS}
+            t = set(re.findall(r"[a-z0-9]+", text.lower()))
+            scores.append(len(q & t) / len(q) if q else 0.0)
+        return np.array(scores, dtype=np.float32)
+
+
+def fake_embedder_factory(name: str) -> EmbeddingService:
+    return EmbeddingService(name, model=FakeEncoder())
 
 
 # --------------------------------------------------------------------- settings / app
@@ -79,6 +104,10 @@ def settings(tmp_path: Path) -> Settings:
         metadata_db_path=tmp_path / "documents.sqlite3",
         chroma_collection="test_chunks",
         embedding_model="fake-encoder",
+        embedding_model_choices="fake-encoder-two",
+        llm_model="fake-llm",
+        llm_model_choices="fake-llm-two",
+        rerank_enabled=False,  # tests that want it pass rerank=True per question
         chunk_size=300,
         chunk_overlap=50,
         max_upload_size_mb=2,
@@ -98,13 +127,27 @@ def fake_llm() -> FakeLLM:
     return FakeLLM()
 
 
-def make_container(settings: Settings, embedder: EmbeddingService, llm: FakeLLM | None) -> Container:
-    return build_container(settings, embedder=embedder, llm=llm, use_configured_llm=False)
+@pytest.fixture
+def fake_reranker() -> FakeReranker:
+    return FakeReranker()
+
+
+def make_container(
+    settings: Settings, embedder: EmbeddingService, llm: FakeLLM | None, reranker: FakeReranker | None = None
+) -> Container:
+    return build_container(
+        settings,
+        embedder=embedder,
+        llm=llm,
+        use_configured_llm=False,
+        embedder_factory=fake_embedder_factory,
+        reranker=RerankService("fake-reranker", model=reranker or FakeReranker()),
+    )
 
 
 @pytest.fixture
-def container(settings, embedder, fake_llm) -> Container:
-    return make_container(settings, embedder, fake_llm)
+def container(settings, embedder, fake_llm, fake_reranker) -> Container:
+    return make_container(settings, embedder, fake_llm, fake_reranker)
 
 
 @pytest.fixture
