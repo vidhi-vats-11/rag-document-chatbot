@@ -69,6 +69,10 @@ class AskResponse(BaseModel):
         default=False, description="True when the answer was reused from the answer cache (no LLM request used)."
     )
 
+    summary: bool = Field(
+        default=False, description="True when the whole document was read to answer (a 'summarize' request)."
+    )
+
 
 class CacheClearedResponse(BaseModel):
     removed: int = Field(description="Number of cached answers deleted.")

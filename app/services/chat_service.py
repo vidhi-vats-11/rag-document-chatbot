@@ -38,6 +38,7 @@ class ChatAnswer:
     llm_model: str | None = None  # model that wrote the answer; None when the LLM was not called
     reranked: bool = False  # True when the sources were re-ranked by the cross-encoder
     cached: bool = False  # True when the answer was reused from the answer cache (no LLM call)
+    summary: bool = False  # True when the whole document was read (a "summarize" request)
 
 
 class ChatService:
@@ -108,7 +109,8 @@ class ChatService:
         # "Summarize this document" matches no particular passage, so searching for it finds
         # little. Instead, give the LLM the whole document in reading order (up to a limit).
         single_doc = self._single_document(targets)
-        if single_doc and is_summary_request(question):
+        summary = bool(single_doc) and is_summary_request(question)
+        if summary:
             chunks = self.retrieval.document_chunks(*single_doc, limit=self.summary_max_chunks)
         else:
             chunks = self.retrieval.retrieve_any(queries, targets, top_k=top_k, rerank=rerank)
@@ -125,7 +127,8 @@ class ChatService:
             hit = self.cache.lookup(question, document_id, model, chunks, history)
             if hit:
                 return ChatAnswer(
-                    hit.answer, hit.sources, grounded=True, llm_model=hit.llm_model, reranked=reranked, cached=True
+                    hit.answer, hit.sources, grounded=True, llm_model=hit.llm_model, reranked=reranked, cached=True,
+                    summary=summary,
                 )
 
         answer = self.generation.generate(question, chunks, history, model=model)
@@ -136,7 +139,7 @@ class ChatService:
         sources = [chunks[i - 1] for i in cited]
         if cacheable:
             self.cache.store(question, document_id, model, chunks, answer, sources, history)
-        return ChatAnswer(answer, sources, grounded=True, llm_model=model, reranked=reranked)
+        return ChatAnswer(answer, sources, grounded=True, llm_model=model, reranked=reranked, summary=summary)
 
     @staticmethod
     def _single_document(targets: dict[str, list[str] | None]) -> tuple[str, str] | None:

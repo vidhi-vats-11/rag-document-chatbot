@@ -378,6 +378,13 @@ select:hover { border-color: var(--accent); }
   font-size: 13px;
 }
 
+.answer { white-space: normal; }
+.answer p { margin: 0 0 10px; }
+.answer p:last-child, .answer ul:last-child { margin-bottom: 0; }
+.answer ul { margin: 0 0 10px; padding-left: 22px; }
+.answer li { margin: 4px 0; }
+.source-line { font-size: 13px; color: var(--muted); }
+
 .answer-meta {
   margin-top: 10px; font-size: 12px; color: var(--muted); white-space: normal;
   display: flex; align-items: center; gap: 6px;

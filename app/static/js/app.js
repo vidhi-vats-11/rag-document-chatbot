@@ -296,9 +296,54 @@ function autoGrow(textarea) {
   textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
-function renderSources(sources) {
+// The AI writes simple Markdown (**bold**, "* " bullets). Turn it into elements made only of
+// text nodes: nothing from the answer is ever parsed as HTML, so it can't inject anything.
+function inline(text) {
+  const out = [];
+  text.split(/(\*\*[^*]+\*\*)/g).forEach((part) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) out.push(el("strong", {}, part.slice(2, -2)));
+    else if (part) out.push(part);
+  });
+  return out;
+}
+
+function renderAnswer(text) {
+  const root = el("div", { class: "answer" });
+  let list = null;
+  let para = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = line.match(/^\s*(?:[*\-•]|\d+[.)])\s+(.*)$/);
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (bullet) {
+      para = null;
+      if (!list) root.append((list = el("ul")));
+      list.append(el("li", {}, ...inline(bullet[1])));
+    } else if (heading) {
+      list = para = null;
+      root.append(el("p", {}, el("strong", {}, ...inline(heading[1]))));
+    } else if (!line.trim()) {
+      list = para = null;
+    } else if (para) {
+      para.append(el("br"), ...inline(line));
+    } else {
+      list = null;
+      root.append((para = el("p", {}, ...inline(line))));
+    }
+  }
+  return root;
+}
+
+function renderSources(sources, meta) {
   if (!sources.length) return null;
   const box = el("div", { class: "sources" }, el("h3", {}, "Sources"));
+  if (meta?.summary) {
+    // A summary reads the whole document, so a per-passage list (and "relevance") means little.
+    const pages = sources.map((s) => s.page_number).filter((p) => p != null);
+    const range = pages.length ? `, pages ${Math.min(...pages)}–${Math.max(...pages)}` : "";
+    box.append(el("div", { class: "source-line" }, `Read the whole document: ${sources[0].filename}${range}`));
+    return box;
+  }
   sources.forEach((s) => {
     const where = s.page_number != null ? `${s.filename}, page ${s.page_number}` : s.filename;
     box.append(
@@ -314,8 +359,8 @@ function renderSources(sources) {
 
 function showBotAnswer(node, answer, sources, meta) {
   node.className = "msg bot";
-  node.textContent = answer;
-  const box = renderSources(sources || []);
+  node.replaceChildren(renderAnswer(answer));
+  const box = renderSources(sources || [], meta);
   if (box) node.append(box);
   if (meta?.cached) {
     // Reused an earlier answer to the same question: instant, and no AI request was used.
@@ -388,7 +433,7 @@ function setupChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const meta = { llm_model: res.llm_model, reranked: res.reranked, cached: res.cached };
+      const meta = { llm_model: res.llm_model, reranked: res.reranked, cached: res.cached, summary: res.summary };
       showBotAnswer(pending, res.answer, res.sources, meta);
       turns.push({ question: q, answer: res.answer, sources: res.sources, meta });
       saveTurns();

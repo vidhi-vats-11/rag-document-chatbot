@@ -47,6 +47,7 @@ def ask(body: AskRequest, service: Annotated[ChatService, Depends(get_chat_servi
         llm_model=result.llm_model,
         reranked=result.reranked,
         cached=result.cached,
+        summary=result.summary,
         sources=[
             SourceOut(
                 document_id=s.document_id,

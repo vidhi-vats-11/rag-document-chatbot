@@ -47,7 +47,8 @@ def test_summary_of_selected_document_sends_every_page_in_order(client, fake_llm
     upload(client, "policy.pdf", make_text_pdf([REFUND_TEXT, SHIPPING_TEXT]), PDF)
     res = ask(client, "Summarize this document", document_id=doc_id).json()
 
-    assert res["grounded"] is True
+    assert res["grounded"] is True and res["summary"] is True
+    assert ask(client, "What is the refund window?", document_id=doc_id).json()["summary"] is False
     prompt = fake_llm.calls[-1][1]
     assert prompt.index("alpha") < prompt.index("bravo") < prompt.index("charlie")
     assert "Refund" not in prompt  # only the selected document

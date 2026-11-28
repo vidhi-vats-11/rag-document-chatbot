@@ -26,7 +26,7 @@ def test_no_documents_indexed(client, fake_llm):
     assert res.status_code == 200
     assert res.json() == {
         "answer": NO_DOCUMENTS_ANSWER, "sources": [], "grounded": False, "llm_model": None, "reranked": False,
-        "cached": False,
+        "cached": False, "summary": False,
     }
     assert fake_llm.calls == []
 
