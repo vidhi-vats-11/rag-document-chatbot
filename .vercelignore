@@ -1,0 +1,19 @@
+# Files that must never be uploaded to Vercel
+.env
+.env.*
+!.env.example
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+samples/
+tests/
+scripts/
+CLAUDE.md
+PROJECT_TRACKER.md
+Dockerfile
+.dockerignore
+.DS_Store

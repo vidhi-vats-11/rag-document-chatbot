@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import chat, documents, health, models
-from app.core.config import Settings, get_settings
+from app.core.config import EmbeddingProvider, Settings, get_settings
 from app.core.container import Container, build_container
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging
@@ -39,7 +39,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
             app.state.container = build_container(settings)
             logger.info("Loading embedding model (first run downloads it)...")
             app.state.container.embedder.warm_up()
-            if settings.rerank_enabled:
+            if settings.rerank_enabled and settings.embedding_provider is EmbeddingProvider.LOCAL:
                 logger.info("Loading re-ranking model (first run downloads it)...")
                 app.state.container.reranker.warm_up()
         c: Container = app.state.container

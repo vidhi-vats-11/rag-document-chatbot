@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +26,20 @@ class EmbeddingService:
         model_name: str,
         batch_size: int = 32,
         model: SentenceEncoder | None = None,
+        loader: Callable[[str], SentenceEncoder] | None = None,
     ) -> None:
         self.model_name = model_name
         self.batch_size = batch_size
         self._model = model
+        self._loader = loader or _load_local_model  # e.g. an online API instead (api_embeddings.py)
         self._lock = threading.Lock()
 
     def _get_model(self) -> SentenceEncoder:
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    from app.services.onnx_models import OnnxSentenceEncoder  # heavy import
-
                     logger.info("Loading embedding model '%s'...", self.model_name)
-                    self._model = OnnxSentenceEncoder(self.model_name)
+                    self._model = self._loader(self.model_name)
         return self._model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -54,3 +54,9 @@ class EmbeddingService:
     def warm_up(self) -> None:
         """Load the model now (used at startup so the first request is not slow)."""
         self._get_model()
+
+
+def _load_local_model(model_name: str) -> SentenceEncoder:
+    from app.services.onnx_models import OnnxSentenceEncoder  # heavy import
+
+    return OnnxSentenceEncoder(model_name)

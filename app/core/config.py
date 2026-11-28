@@ -21,6 +21,11 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"  # OpenAI or any OpenAI-compatible server (e.g. Ollama)
 
 
+class EmbeddingProvider(str, Enum):
+    LOCAL = "local"  # models run on this computer (ONNX Runtime): free, private, ~90 MB per model
+    API = "api"  # an OpenAI-compatible embedding API (e.g. Gemini); for hosts with no room for models
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -49,6 +54,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=150, ge=0, description="Characters shared between neighbouring chunks")
 
     # --- Embeddings ---
+    # "api" uses LLM_BASE_URL + LLM_API_KEY (e.g. EMBEDDING_MODEL=gemini-embedding-001) and turns
+    # re-ranking off, because no local models are loaded at all. Used for Vercel.
+    embedding_provider: EmbeddingProvider = EmbeddingProvider.LOCAL
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = Field(default=32, ge=1)
     # Models the user may pick per upload (comma-separated). EMBEDDING_MODEL is always allowed.

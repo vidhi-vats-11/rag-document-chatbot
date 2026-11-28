@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from app.core.config import Settings
+from app.core.config import EmbeddingProvider, Settings
 from app.repositories.answer_cache_repository import AnswerCacheRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.vector_store import VectorStore
@@ -54,7 +54,13 @@ def build_container(
         ocr_min_chars_per_page=settings.ocr_min_chars_per_page,
         tesseract_cmd=settings.tesseract_cmd,
     )
-    embedder = embedder or EmbeddingService(settings.embedding_model, settings.embedding_batch_size)
+    api_mode = settings.embedding_provider is EmbeddingProvider.API
+    loader = None
+    if api_mode:
+        from app.services.api_embeddings import ApiSentenceEncoder
+
+        loader = lambda name: ApiSentenceEncoder(name, settings)  # noqa: E731
+    embedder = embedder or EmbeddingService(settings.embedding_model, settings.embedding_batch_size, loader=loader)
     vector_store = VectorStore(settings.chroma_db_dir, settings.chroma_collection, embedder.model_name)
     spaces = EmbeddingSpaces(
         default_embedder=embedder,
@@ -63,7 +69,7 @@ def build_container(
         base_collection=settings.chroma_collection,
         allowed_models=settings.embedding_models,
         embedder_factory=embedder_factory
-        or (lambda name: EmbeddingService(name, settings.embedding_batch_size)),
+        or (lambda name: EmbeddingService(name, settings.embedding_batch_size, loader=loader)),
     )
     reranker = reranker or RerankService(settings.rerank_model)
     documents = DocumentRepository(settings.metadata_db_path)
@@ -85,7 +91,7 @@ def build_container(
         documents=document_service,
         retrieval=RetrievalService(
             spaces,
-            reranker,
+            None if api_mode else reranker,  # API mode loads no local models, so no re-ranker
             default_top_k=settings.top_k,
             min_relevance_score=settings.min_relevance_score,
             rerank_by_default=settings.rerank_enabled,

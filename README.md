@@ -24,6 +24,9 @@ ChromaDB and a configurable LLM (Claude by default, or any OpenAI-compatible API
 - **Built carefully:** layered design (routes → services → repositories), file-content validation,
   prompt-injection defences, background indexing, and 125 automated tests.
 
+**🌐 Live demo:** https://vidhi-rag-document-chatbot.vercel.app. It's a lighter "Vercel mode": Gemini
+embeddings, no re-ranking, no OCR (scanned PDFs/images), and uploads are temporary. See section 8.
+
 <!-- Demo video: drag your .mp4 into a GitHub README edit box to upload it, and it will appear here. -->
 
 ---
@@ -370,3 +373,28 @@ prompt-injection escaping, and provider adapters with mocked SDKs.
 | Startup error about embedding model mismatch | See the last limitation above |
 | Every answer is "couldn't find relevant information" | Lower `MIN_RELEVANCE_SCORE` (e.g. 0.10), or rephrase using words from the document |
 | "The AI service is busy right now" | The provider is temporarily overloaded (common on free tiers); retry after a moment |
+
+---
+
+## 8. Deploying on Vercel ("API mode")
+
+Vercel gives the app and its libraries only ~500 MB, so local models don't fit. With
+`EMBEDDING_PROVIDER=api` the app gets embeddings from Gemini instead (same key as the LLM), loads
+no local models and turns re-ranking off. `pyproject.toml` lists the slimmer Vercel dependencies
+and skips packages the app never uses (~334 MB instead of ~485 MB). `index.py` is Vercel's entry
+point and `.vercelignore` keeps `.env`, tests and data out of the upload.
+
+```bash
+vercel link --project <name>
+vercel env add LLM_API_KEY production          # paste the key yourself (mark it Sensitive)
+# plus these settings (vercel env add NAME production):
+#   LLM_PROVIDER=openai  LLM_MODEL=gemini-3.5-flash-lite  LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+#   EMBEDDING_PROVIDER=api  EMBEDDING_MODEL=gemini-embedding-001  EMBEDDING_MODEL_CHOICES=gemini-embedding-001
+#   RERANK_ENABLED=false  MIN_RELEVANCE_SCORE=0.58  BACKGROUND_INDEXING=false
+#   UPLOAD_DIR=/tmp/data/uploads  CHROMA_DB_DIR=/tmp/data/chroma_db  METADATA_DB_PATH=/tmp/data/documents.sqlite3
+vercel deploy --prod
+```
+
+Limits there: no OCR (no Tesseract), files live in `/tmp` and disappear when Vercel restarts the
+app, and every upload/question uses Gemini embedding requests. `MIN_RELEVANCE_SCORE=0.58` because
+Gemini's scores sit higher than MiniLM's (unrelated text ≈ 0.5, relevant ≈ 0.7).
