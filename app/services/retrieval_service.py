@@ -34,6 +34,10 @@ class RetrievalService:
         self.rerank_by_default = rerank_by_default
         self.rerank_candidates = rerank_candidates
 
+    def document_chunks(self, model_name: str, document_id: str, limit: int) -> list[RetrievedChunk]:
+        """A whole document (its first `limit` chunks) in reading order, for summaries."""
+        return self.spaces.get(model_name).store.document_chunks(document_id, limit)
+
     def retrieve(
         self,
         question: str,

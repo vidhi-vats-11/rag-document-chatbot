@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.core.exceptions import DocumentNotFoundError, InvalidModelError, LLMNotConfiguredError
@@ -16,6 +17,17 @@ NO_RELEVANT_ANSWER = (
     "I couldn't find information relevant to your question in the uploaded documents, "
     "so I can't answer it from them. Try rephrasing, or check that the right document is selected."
 )
+
+# "Summarize this", "give me an overview", "what is this document about?", "key points"...
+_SUMMARY_REQUEST = re.compile(
+    r"\b(summar(y|ies|i[sz]e|i[sz]ing)|overview|tl;?dr|gist|key (points|takeaways)|main (points|ideas)"
+    r"|what('s| is) (this|the) (document|doc|file|pdf|text) about)\b",
+    re.IGNORECASE,
+)
+
+
+def is_summary_request(question: str) -> bool:
+    return bool(_SUMMARY_REQUEST.search(question))
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,7 @@ class ChatService:
         history_turns: int = 6,
         llm_models: list[str] | None = None,
         cache: AnswerCacheService | None = None,
+        summary_max_chunks: int = 40,
     ) -> None:
         self.documents = documents
         self.retrieval = retrieval
@@ -45,6 +58,7 @@ class ChatService:
         # Allowed models, default first. Empty = no choice offered (use the configured model).
         self.llm_models = llm_models or []
         self.cache = cache
+        self.summary_max_chunks = summary_max_chunks
 
     def ask(
         self,
@@ -75,6 +89,8 @@ class ChatService:
             targets = {m: [document_id] for m, ids in by_model.items() if document_id in ids}
             if not targets:
                 raise DocumentNotFoundError("The selected document does not exist or is not indexed.")
+        elif sum(len(ids) for ids in by_model.values()) == 1:
+            targets = dict(by_model)  # only one document exists: "all documents" means that one
         else:
             targets = {m: None for m in by_model}
         if not targets:
@@ -88,7 +104,14 @@ class ChatService:
         queries = [question]
         if history:
             queries.append(f"{history[-1].question}\n{question}")
-        chunks = self.retrieval.retrieve_any(queries, targets, top_k=top_k, rerank=rerank)
+
+        # "Summarize this document" matches no particular passage, so searching for it finds
+        # little. Instead, give the LLM the whole document in reading order (up to a limit).
+        single_doc = self._single_document(targets)
+        if single_doc and is_summary_request(question):
+            chunks = self.retrieval.document_chunks(*single_doc, limit=self.summary_max_chunks)
+        else:
+            chunks = self.retrieval.retrieve_any(queries, targets, top_k=top_k, rerank=rerank)
         if not chunks:
             # Don't ask the LLM with no evidence — that invites a made-up answer.
             return ChatAnswer(NO_RELEVANT_ANSWER, [], grounded=False)
@@ -114,6 +137,14 @@ class ChatService:
         if cacheable:
             self.cache.store(question, document_id, model, chunks, answer, sources, history)
         return ChatAnswer(answer, sources, grounded=True, llm_model=model, reranked=reranked)
+
+    @staticmethod
+    def _single_document(targets: dict[str, list[str] | None]) -> tuple[str, str] | None:
+        """(embedding model, document id) when exactly one document is being searched."""
+        if len(targets) != 1:
+            return None
+        model, ids = next(iter(targets.items()))
+        return (model, ids[0]) if ids and len(ids) == 1 else None
 
     def _resolve_llm_model(self, requested: str | None) -> str | None:
         """Only models from the allowed list may be used (each one can cost quota or money)."""

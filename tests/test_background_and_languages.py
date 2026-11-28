@@ -105,7 +105,7 @@ def test_resume_marks_failed_when_file_is_gone(container):
     record, _ = service.upload("a.pdf", PDF, make_text_pdf([REFUND_TEXT]))
     record.status = DocumentStatus.PROCESSING
     service.documents.save(record)
-    (service.upload_dir / record.stored_filename).unlink()
+    service.files.delete(record.stored_filename)
 
     service.resume_unfinished()
     after = service.get_document(record.document_id)

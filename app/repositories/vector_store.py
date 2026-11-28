@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _UPSERT_BATCH = 500
 
 
-class VectorStore:
+class ChromaVectorStore:
     def __init__(self, persist_dir: Path, collection_name: str, embedding_model: str) -> None:
         self._client = chromadb.PersistentClient(
             path=str(persist_dir),
@@ -105,6 +105,25 @@ class VectorStore:
                 )
             )
         return hits
+
+    def document_chunks(self, document_id: str, limit: int) -> list[RetrievedChunk]:
+        """The first `limit` chunks of one document, in reading order (used for summaries)."""
+        result = self._collection.get(where={"document_id": document_id}, include=["documents", "metadatas"])
+        rows = sorted(
+            zip(result["ids"], result["documents"], result["metadatas"]),
+            key=lambda r: (int(r[2].get("page_number", 0)), int(r[2].get("chunk_index", 0))),
+        )[:limit]
+        return [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                document_id=str(meta["document_id"]),
+                filename=str(meta.get("filename", "unknown")),
+                text=text or "",
+                page_number=int(meta["page_number"]) if "page_number" in meta else None,
+                score=1.0,
+            )
+            for chunk_id, text, meta in rows
+        ]
 
     def count_for_document(self, document_id: str) -> int:
         return len(self._collection.get(where={"document_id": document_id}, include=[])["ids"])

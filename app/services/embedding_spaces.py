@@ -1,4 +1,4 @@
-"""One "embedding space" per embedding model: the model itself plus its own Chroma collection.
+"""One "embedding space" per embedding model: the model itself plus its own vector store.
 
 Vectors made by different models have different sizes (384 vs 768 numbers) and different
 meanings, so they must never share a collection. Each document is indexed with the model
@@ -15,12 +15,22 @@ from __future__ import annotations
 import hashlib
 import threading
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Protocol
 
 from app.core.exceptions import InvalidModelError
-from app.repositories.vector_store import VectorStore
+from app.domain import RetrievedChunk, TextChunk
 from app.services.embedding_service import EmbeddingService
+
+
+class VectorStore(Protocol):
+    """What a vector store offers: ChromaDB locally (vector_store.py), pgvector with a database."""
+
+    def upsert_chunks(self, chunks: list[TextChunk], embeddings: list[list[float]]) -> None: ...
+    def delete_document(self, document_id: str) -> None: ...
+    def search(self, query_embedding: list[float], top_k: int, document_ids: list[str] | None = None) -> list[RetrievedChunk]: ...
+    def document_chunks(self, document_id: str, limit: int) -> list[RetrievedChunk]: ...
+    def count_for_document(self, document_id: str) -> int: ...
+    def count(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -35,14 +45,15 @@ class EmbeddingSpaces:
         self,
         default_embedder: EmbeddingService,
         default_store: VectorStore,
-        persist_dir: Path,
         base_collection: str,
         allowed_models: list[str],
         embedder_factory: Callable[[str], EmbeddingService],
+        store_factory: Callable[[str, str], Any],
     ) -> None:
+        """`store_factory(collection_name, model_name)` makes the vector store for another model."""
         self.default_model = default_embedder.model_name
         self.allowed_models = list(dict.fromkeys([self.default_model, *allowed_models]))
-        self._persist_dir = persist_dir
+        self._store_factory = store_factory
         self._base_collection = base_collection
         self._embedder_factory = embedder_factory
         self._spaces = {self.default_model: EmbeddingSpace(self.default_model, default_embedder, default_store)}
@@ -62,7 +73,7 @@ class EmbeddingSpaces:
         name = self.resolve(model_name)
         with self._lock:
             if name not in self._spaces:
-                store = VectorStore(self._persist_dir, self._collection_name(name), name)
+                store = self._store_factory(self._collection_name(name), name)
                 self._spaces[name] = EmbeddingSpace(name, self._embedder_factory(name), store)
             return self._spaces[name]
 

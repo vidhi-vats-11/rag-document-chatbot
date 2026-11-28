@@ -18,11 +18,11 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.core.exceptions import AppError, DocumentBusyError, DocumentNotFoundError, ExtractionError
 from app.domain import DocumentRecord, DocumentStatus
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.file_store import FileStore
 from app.services.chunking_service import ChunkingService
 from app.services.embedding_spaces import EmbeddingSpaces
 from app.services.extraction_service import ExtractionService
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class DocumentService:
     def __init__(
         self,
-        upload_dir: Path,
+        files: FileStore,
         max_upload_bytes: int,
         documents: DocumentRepository,
         spaces: EmbeddingSpaces,
@@ -42,7 +42,7 @@ class DocumentService:
         chunker: ChunkingService,
         background: bool = True,
     ) -> None:
-        self.upload_dir = upload_dir.resolve()
+        self.files = files  # the original uploads: a local folder, or the database
         self.max_upload_bytes = max_upload_bytes
         self.documents = documents
         self.spaces = spaces
@@ -91,8 +91,7 @@ class DocumentService:
 
             # Server-generated name: never derived from user input, so no path traversal.
             stored_filename = f"{document_id}{validated.extension}"
-            path = self._safe_path(stored_filename)
-            path.write_bytes(validated.content)
+            self.files.save(stored_filename, validated.content)
 
             record = DocumentRecord(
                 document_id=document_id,
@@ -114,10 +113,10 @@ class DocumentService:
         """Restart indexing for documents left "processing" when the server stopped."""
         unfinished = [self._with_model(r) for r in self.documents.list_by_status(DocumentStatus.PROCESSING)]
         for record in unfinished:
-            path = self._safe_path(record.stored_filename)
-            if path.exists():
+            content = self.files.read(record.stored_filename)
+            if content is not None:
                 logger.info("Resuming indexing of %s (%s)", record.document_id, record.filename)
-                self._schedule(record, path.read_bytes())
+                self._schedule(record, content)
             else:
                 self._mark_failed(record, "The uploaded file is missing. Please upload it again.")
         return len(unfinished)
@@ -216,8 +215,7 @@ class DocumentService:
             # Deleting now would race with the worker, which would write the record back.
             raise DocumentBusyError("This document is still being indexed. Wait until it finishes, then delete it.")
         self.spaces.get(record.embedding_model).store.delete_document(document_id)
-        path = self._safe_path(record.stored_filename)
-        path.unlink(missing_ok=True)
+        self.files.delete(record.stored_filename)
         self.documents.delete(document_id)
         logger.info("Deleted document %s", document_id)
 
@@ -228,10 +226,3 @@ class DocumentService:
         if record is not None and record.embedding_model is None:
             record.embedding_model = self.spaces.default_model
         return record
-
-    def _safe_path(self, stored_filename: str) -> Path:
-        """Resolve a path and refuse anything that escapes the upload directory."""
-        path = (self.upload_dir / stored_filename).resolve()
-        if not path.is_relative_to(self.upload_dir):
-            raise AppError("Invalid storage path.")
-        return path

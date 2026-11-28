@@ -4,7 +4,7 @@ import pytest
 
 from app.core.exceptions import EmbeddingModelMismatchError
 from app.domain import TextChunk
-from app.repositories.vector_store import VectorStore
+from app.repositories.vector_store import ChromaVectorStore as VectorStore
 from app.services.embedding_service import EmbeddingService
 from tests.conftest import FakeEncoder
 

@@ -46,12 +46,12 @@ def test_scanned_pdf_without_tesseract_warns(monkeypatch, extractor):
     monkeypatch.setattr(extractor, "ocr_available", lambda: False)
     result = extractor.extract(make_scanned_pdf("anything"), FileKind.PDF)
     assert result.total_chars == 0
-    assert any("Tesseract" in w for w in result.warnings)
+    assert any("OCR is not available" in w for w in result.warnings)
 
 
 def test_image_without_tesseract_raises(monkeypatch, extractor):
     monkeypatch.setattr(extractor, "ocr_available", lambda: False)
-    with pytest.raises(ExtractionError, match="Tesseract"):
+    with pytest.raises(ExtractionError, match="OCR is not available"):
         extractor.extract(render_text_image("x"), FileKind.IMAGE)
 
 

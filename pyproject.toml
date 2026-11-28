@@ -3,14 +3,17 @@ name = "rag-document-chatbot"
 version = "1.0.0"
 description = "RAG chatbot over uploaded PDFs, scanned PDFs, images and DOCX files"
 requires-python = ">=3.11"
-# Used by Vercel (it installs from this file), with EMBEDDING_PROVIDER=api: no local models,
-# so no fastembed / ONNX Runtime. Locally, install requirements.txt instead (it has everything).
+# Used by Vercel (it installs from this file): EMBEDDING_PROVIDER=api (no local models, so no
+# fastembed / ONNX Runtime) and DATABASE_URL (Postgres instead of ChromaDB + SQLite files).
+# Locally, install requirements.txt instead (it has everything).
 dependencies = [
-    "chromadb~=1.5.9",
     "fastapi~=0.160.0",
     "jinja2~=3.1.6",
+    "numpy~=2.0",
     "openai~=3.36",
     "pillow~=13.0",
+    "psycopg-pool~=3.3",
+    "psycopg[binary]~=3.3",
     "pydantic-settings~=2.16",
     "pydantic~=2.14",
     "pymupdf~=2.0",
@@ -22,14 +25,11 @@ dependencies = [
 
 # Vercel allows ~500 MB for the app AND its libraries (installed into /tmp at start-up). These are
 # pulled in by other packages but never used by this app, so they are skipped there:
-#   kubernetes        <- chromadb (only for its distributed server mode; we use it embedded)
-#   onnxruntime, tokenizers <- chromadb (its built-in embedding model; we pass our own vectors)
 #   pymupdf-layout, pymupdf4llm, onnxruntime, networkx <- pymupdf (AI page-layout add-ons)
 #   uvloop, watchfiles, httptools <- uvicorn[standard] (speed-ups / auto-reload for local use)
 [tool.uv]
 exclude-dependencies = [
-    "kubernetes", "onnxruntime", "tokenizers", "huggingface-hub", "hf-xet",
-    "pymupdf-layout", "pymupdf4llm", "networkx", "uvloop", "watchfiles", "httptools",
+    "onnxruntime", "pymupdf-layout", "pymupdf4llm", "networkx", "uvloop", "watchfiles", "httptools",
 ]
 
 [tool.pytest.ini_options]

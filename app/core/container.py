@@ -9,16 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from app.core.config import EmbeddingProvider, Settings
+from app.core.config import EmbeddingProvider, OCRProvider, Settings
 from app.repositories.answer_cache_repository import AnswerCacheRepository
 from app.repositories.document_repository import DocumentRepository
-from app.repositories.vector_store import VectorStore
+from app.repositories.file_store import LocalFileStore
 from app.services.answer_cache_service import AnswerCacheService
 from app.services.chat_service import ChatService
 from app.services.chunking_service import ChunkingService
 from app.services.document_service import DocumentService
 from app.services.embedding_service import EmbeddingService
-from app.services.embedding_spaces import EmbeddingSpaces
+from app.services.embedding_spaces import EmbeddingSpaces, VectorStore
 from app.services.extraction_service import ExtractionService
 from app.services.generation_service import GenerationService
 from app.services.llm_providers import LLMClient, build_llm_client
@@ -48,11 +48,17 @@ def build_container(
 ) -> Container:
     settings.ensure_directories()
 
+    image_reader = None
+    if settings.ocr_provider is OCRProvider.LLM:
+        from app.services.llm_ocr import LLMImageReader
+
+        image_reader = LLMImageReader(settings)
     extractor = ExtractionService(
         ocr_language=settings.ocr_language,
         ocr_dpi=settings.ocr_dpi,
         ocr_min_chars_per_page=settings.ocr_min_chars_per_page,
         tesseract_cmd=settings.tesseract_cmd,
+        image_reader=image_reader,
     )
     api_mode = settings.embedding_provider is EmbeddingProvider.API
     loader = None
@@ -61,21 +67,39 @@ def build_container(
 
         loader = lambda name: ApiSentenceEncoder(name, settings)  # noqa: E731
     embedder = embedder or EmbeddingService(settings.embedding_model, settings.embedding_batch_size, loader=loader)
-    vector_store = VectorStore(settings.chroma_db_dir, settings.chroma_collection, embedder.model_name)
+
+    # Storage: Postgres when DATABASE_URL is set (shared by every copy of the app, e.g. on
+    # Vercel); otherwise local files: SQLite, ChromaDB and the uploads folder.
+    if settings.uses_database:
+        from app.repositories.postgres import (
+            PgAnswerCacheRepository, PgDocumentRepository, PgFileStore, PgVectorStore, PostgresDatabase,
+        )
+
+        db = PostgresDatabase(settings.database_url.get_secret_value())
+        store_factory = lambda _collection, model: PgVectorStore(db, model)  # noqa: E731
+        documents, files, cache_repo = PgDocumentRepository(db), PgFileStore(db), PgAnswerCacheRepository(db)
+    else:
+        from app.repositories.vector_store import ChromaVectorStore
+
+        store_factory = lambda collection, model: ChromaVectorStore(settings.chroma_db_dir, collection, model)  # noqa: E731
+        documents = DocumentRepository(settings.metadata_db_path)
+        files = LocalFileStore(settings.upload_dir)
+        cache_repo = AnswerCacheRepository(settings.metadata_db_path)
+
+    vector_store = store_factory(settings.chroma_collection, embedder.model_name)
     spaces = EmbeddingSpaces(
         default_embedder=embedder,
         default_store=vector_store,
-        persist_dir=settings.chroma_db_dir,
+        store_factory=store_factory,
         base_collection=settings.chroma_collection,
         allowed_models=settings.embedding_models,
         embedder_factory=embedder_factory
         or (lambda name: EmbeddingService(name, settings.embedding_batch_size, loader=loader)),
     )
     reranker = reranker or RerankService(settings.rerank_model)
-    documents = DocumentRepository(settings.metadata_db_path)
 
     document_service = DocumentService(
-        upload_dir=settings.upload_dir,
+        files=files,
         max_upload_bytes=settings.max_upload_bytes,
         documents=documents,
         spaces=spaces,
@@ -99,9 +123,10 @@ def build_container(
         ),
         generation=GenerationService(llm),
         history_turns=settings.chat_history_turns,
+        summary_max_chunks=settings.summary_max_chunks,
         llm_models=settings.llm_models,
         cache=AnswerCacheService(
-            AnswerCacheRepository(settings.metadata_db_path),
+            cache_repo,
             embedder,
             enabled=settings.answer_cache_enabled,
             min_similarity=settings.answer_cache_min_similarity,

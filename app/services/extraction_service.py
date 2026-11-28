@@ -6,6 +6,7 @@ import io
 import logging
 import re
 import shutil
+from typing import Callable
 
 import pymupdf
 import pytesseract
@@ -33,8 +34,11 @@ class ExtractionService:
         ocr_dpi: int = 300,
         ocr_min_chars_per_page: int = 50,
         tesseract_cmd: str | None = None,
+        image_reader: Callable[[Image.Image], str] | None = None,
     ) -> None:
         self.ocr_language = ocr_language
+        # Reads text from an image instead of Tesseract, e.g. the LLM (llm_ocr.py, OCR_PROVIDER=llm).
+        self._image_reader = image_reader
         self.ocr_dpi = ocr_dpi
         self.ocr_min_chars_per_page = ocr_min_chars_per_page
         if tesseract_cmd:
@@ -44,11 +48,11 @@ class ExtractionService:
     # ------------------------------------------------------------------ public
 
     def ocr_available(self) -> bool:
-        return shutil.which(self._tesseract_cmd) is not None
+        return self._image_reader is not None or shutil.which(self._tesseract_cmd) is not None
 
     def available_languages(self) -> list[str]:
         """Language codes Tesseract has installed (e.g. ["eng", "fra", "hin"])."""
-        if not self.ocr_available():
+        if self._image_reader is not None or not self.ocr_available():
             return []
         try:
             installed = pytesseract.get_languages(config="")
@@ -122,7 +126,7 @@ class ExtractionService:
 
         if ocr_missing_pages:
             warnings.append(
-                f"Tesseract OCR is not installed, so {len(ocr_missing_pages)} text-poor page(s) "
+                f"OCR is not available, so {len(ocr_missing_pages)} text-poor page(s) "
                 "could not be OCR'd."
             )
         return ExtractionResult(pages=pages, warnings=warnings)
@@ -137,7 +141,7 @@ class ExtractionService:
     def _extract_image(self, content: bytes, language: str) -> ExtractionResult:
         if not self.ocr_available():
             raise ExtractionError(
-                "Tesseract OCR is not installed on the server, so text cannot be read from images."
+                "OCR is not available on the server, so text cannot be read from images."
             )
         try:
             image = Image.open(io.BytesIO(content))
@@ -150,6 +154,8 @@ class ExtractionService:
         return ExtractionResult(pages=[ExtractedPage(text, page_number=1, ocr_used=True)])
 
     def _run_ocr(self, image: Image.Image, language: str) -> str:
+        if self._image_reader is not None:
+            return self._image_reader(image)  # the LLM understands any language
         if image.mode not in ("RGB", "L"):
             image = image.convert("RGB")
         try:

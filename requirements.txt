@@ -13,3 +13,6 @@ fastembed~=0.9.1          # runs Sentence Transformers models with ONNX Runtime 
 chromadb~=1.5.9
 anthropic~=2.1
 openai~=3.36
+# Only used when DATABASE_URL is set (Postgres + pgvector, e.g. Neon on Vercel)
+psycopg[binary]~=3.3
+psycopg-pool~=3.3

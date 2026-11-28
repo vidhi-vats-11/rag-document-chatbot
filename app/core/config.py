@@ -26,6 +26,11 @@ class EmbeddingProvider(str, Enum):
     API = "api"  # an OpenAI-compatible embedding API (e.g. Gemini); for hosts with no room for models
 
 
+class OCRProvider(str, Enum):
+    TESSERACT = "tesseract"  # local Tesseract program (free, private)
+    LLM = "llm"  # the LLM reads the image (Gemini can see images); 1 LLM request per page
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -42,6 +47,9 @@ class Settings(BaseSettings):
     chroma_db_dir: Path = PROJECT_ROOT / "data" / "chroma_db"
     metadata_db_path: Path = PROJECT_ROOT / "data" / "documents.sqlite3"
     chroma_collection: str = "document_chunks"
+    # Postgres (with pgvector) instead of SQLite + ChromaDB + the uploads folder. Needed on hosts
+    # without a shared disk, e.g. Vercel (+ Neon, which sets DATABASE_URL). Empty = local files.
+    database_url: SecretStr | None = None
 
     # --- Upload limits ---
     max_upload_size_mb: float = Field(default=20, gt=0, le=200)
@@ -83,6 +91,7 @@ class Settings(BaseSettings):
     rerank_candidates: int = Field(default=20, ge=1, le=100)
 
     # --- OCR ---
+    ocr_provider: OCRProvider = OCRProvider.TESSERACT
     tesseract_cmd: str | None = None  # e.g. /opt/homebrew/bin/tesseract; None = use PATH
     # Default OCR language(s); the user can pick another per upload. Combine with "+", e.g. "hin+eng".
     ocr_language: str = "eng"
@@ -94,6 +103,9 @@ class Settings(BaseSettings):
     # How many earlier question/answer pairs are sent with a follow-up question.
     # More turns = better memory, but a longer (slower) prompt.
     chat_history_turns: int = Field(default=6, ge=0, le=20)
+    # "Summarize this document": send the document's first N chunks in reading order (not just
+    # the TOP_K best matches). 40 chunks x 1000 characters ~ 40k characters.
+    summary_max_chunks: int = Field(default=40, ge=1, le=200)
 
     # --- LLM ---
     llm_provider: LLMProvider = LLMProvider.ANTHROPIC
@@ -147,6 +159,10 @@ class Settings(BaseSettings):
         if self.llm_provider is LLMProvider.OPENAI and self.llm_base_url:
             return True
         return has_key
+
+    @property
+    def uses_database(self) -> bool:
+        return self.database_url is not None and self.database_url.get_secret_value().strip() != ""
 
     def ensure_directories(self) -> None:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
