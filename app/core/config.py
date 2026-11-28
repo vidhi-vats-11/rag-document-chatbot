@@ -9,6 +9,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -108,13 +109,14 @@ class Settings(BaseSettings):
     summary_max_chunks: int = Field(default=40, ge=1, le=200)
 
     # --- LLM ---
-    llm_provider: LLMProvider = LLMProvider.ANTHROPIC
-    llm_model: str = "claude-opus-5-5"
+    llm_provider: LLMProvider = LLMProvider.OPENAI
+    llm_model: str = "gemini-3.5-flash-lite"
     # Other models of the same provider the user may pick per question (comma-separated).
     # LLM_MODEL is always allowed and is the default.
     llm_model_choices: str = ""
     llm_api_key: SecretStr | None = None
-    llm_base_url: str | None = None  # only for OpenAI-compatible servers
+    # OpenAI-compatible servers only. Default: Google Gemini (free tier). Ollama: http://localhost:11434/v1
+    llm_base_url: str | None = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_timeout_seconds: float = Field(default=60, gt=0)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     llm_max_tokens: int = Field(default=4096, ge=256)
@@ -154,10 +156,12 @@ class Settings(BaseSettings):
 
     @property
     def llm_configured(self) -> bool:
-        """An OpenAI-compatible local server (base_url set) may not need a key."""
+        """A key is needed, except for a server on this computer (e.g. Ollama), which accepts any."""
         has_key = self.llm_api_key is not None and self.llm_api_key.get_secret_value().strip() != ""
         if self.llm_provider is LLMProvider.OPENAI and self.llm_base_url:
-            return True
+            host = (urlparse(self.llm_base_url).hostname or "").lower()
+            if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or host.endswith(".localhost"):
+                return True
         return has_key
 
     @property

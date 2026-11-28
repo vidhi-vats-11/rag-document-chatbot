@@ -32,7 +32,7 @@ class LLMClient(Protocol):
 
 
 class AnthropicClient:
-    """Claude via the official `anthropic` SDK (Messages API)."""
+    """Anthropic models via the official `anthropic` SDK (Messages API)."""
 
     def __init__(self, settings: Settings) -> None:
         import anthropic

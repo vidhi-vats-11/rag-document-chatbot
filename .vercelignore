@@ -12,8 +12,8 @@ data/
 samples/
 tests/
 scripts/
-CLAUDE.md
-PROJECT_TRACKER.md
+# Notes and docs: not needed to run the app
+*.md
 Dockerfile
 .dockerignore
 .DS_Store

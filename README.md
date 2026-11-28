@@ -5,7 +5,7 @@ questions in plain English. Answers are generated **only** from your documents a
 come with the source filename and page number.
 
 Built with FastAPI, PyMuPDF, Tesseract OCR, python-docx, Sentence Transformers,
-ChromaDB and a configurable LLM (Claude by default, or any OpenAI-compatible API).
+ChromaDB and a configurable LLM (Google Gemini by default, or any OpenAI-compatible API).
 
 ## Highlights
 
@@ -21,7 +21,7 @@ ChromaDB and a configurable LLM (Claude by default, or any OpenAI-compatible API
 - **Answer cache:** asking the same question again returns the saved answer instantly, using no
   LLM request. Strict matching (same meaning + same passages) means cached answers are never stale.
 - **Runs for free:** embeddings, re-ranking (ONNX Runtime, no PyTorch needed) and OCR run locally; the LLM can be Google Gemini's
-  free tier, a local Ollama model, Claude or OpenAI.
+  free tier, a local Ollama model, OpenAI or Anthropic.
 - **Built carefully:** layered design (routes → services → repositories), file-content validation,
   prompt-injection defences, background indexing, and 125 automated tests.
 
@@ -132,14 +132,14 @@ and are read from environment variables or `.env`. **Never commit `.env`.**
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_PROVIDER` | `anthropic` | `anthropic` (Claude) or `openai` (OpenAI / OpenAI-compatible) |
-| `LLM_MODEL` | `claude-opus-5-5` | Model ID for the chosen provider (the default) |
+| `LLM_PROVIDER` | `openai` | `openai` (OpenAI / OpenAI-compatible, e.g. Gemini, Ollama) or `anthropic` |
+| `LLM_MODEL` | `gemini-3.5-flash-lite` | Model ID for the chosen provider (the default) |
 | `LLM_MODEL_CHOICES` | — | Other models of the same provider the user may pick per question, comma-separated |
 | `LLM_API_KEY` | — | Your provider API key (**required** for chat) |
-| `LLM_BASE_URL` | — | OpenAI-compatible servers only, e.g. Ollama `http://localhost:11434/v1` |
+| `LLM_BASE_URL` | Gemini's OpenAI-compatible endpoint | OpenAI-compatible servers only, e.g. Ollama `http://localhost:11434/v1`; empty = OpenAI itself |
 | `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | `60` / `2` | Network timeout; SDK retries on 429/5xx with backoff |
-| `LLM_EFFORT` | `low` | Claude reasoning effort: `low`…`max` (higher = slower, costlier) |
-| `ANTHROPIC_ENABLE_FALLBACKS` | `true` | If Claude declines a request, the API retries on a fallback model |
+| `LLM_EFFORT` | `low` | Anthropic only: reasoning effort `low`…`max` (higher = slower, costlier) |
+| `ANTHROPIC_ENABLE_FALLBACKS` | `true` | Anthropic only: if a request is declined, retry on a fallback model |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Default Sentence Transformers model |
 | `EMBEDDING_MODEL_CHOICES` | 4 free local models | Models the user may pick per upload, comma-separated. Each gets its own Chroma collection |
 | `RERANK_ENABLED` | `true` | Re-rank by default (the user can switch it per question) |
@@ -158,9 +158,9 @@ and are read from environment variables or `.env`. **Never commit `.env`.**
 | `OCR_LANGUAGE` / `OCR_DPI` | `eng` / `300` | Default Tesseract language(s) (overridable per upload) and render resolution |
 | `OCR_MIN_CHARS_PER_PAGE` | `50` | PDF pages with less text than this are OCR'd |
 
-**Getting a key:** Claude keys come from https://console.anthropic.com → *API Keys*.
+**Getting a key:** a free Gemini key comes from https://aistudio.google.com/apikey.
 
-**Using OpenAI instead:** `LLM_PROVIDER=openai`, `LLM_MODEL=<model id>`, `LLM_API_KEY=<key>`.
+**Using OpenAI instead:** `LLM_PROVIDER=openai`, `LLM_BASE_URL=` (empty), `LLM_MODEL=<model id>`, `LLM_API_KEY=<key>`.
 **Google Gemini (AI Studio key, free tier):** Gemini has an OpenAI-compatible endpoint, so use
 `LLM_PROVIDER=openai`, `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`,
 `LLM_MODEL=gemini-3.5-flash-lite`, `LLM_API_KEY=<AI Studio key>`, `LLM_MAX_RETRIES=1`.

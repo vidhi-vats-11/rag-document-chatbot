@@ -15,7 +15,8 @@ from app.services.llm_providers import (
 
 
 def _settings(**overrides) -> Settings:
-    base = dict(_env_file=None, llm_api_key="test-key-not-real", llm_max_retries=0)
+    base = dict(_env_file=None, llm_provider=LLMProvider.ANTHROPIC, llm_model="anthropic-test-model",
+                llm_api_key="test-key-not-real", llm_max_retries=0)
     return Settings(**{**base, **overrides})
 
 
@@ -68,7 +69,7 @@ def test_anthropic_success_joins_text_blocks(monkeypatch):
     captured = _fake_create(monkeypatch, client, result=response)
 
     assert client.complete("sys", "user msg") == "Refunds take 30 days [1]."
-    assert captured["model"] == "claude-opus-5-5"
+    assert captured["model"] == "anthropic-test-model"
     assert captured["system"] == "sys"
     assert captured["messages"] == [{"role": "user", "content": "user msg"}]
     assert captured["output_config"] == {"effort": "low"}
